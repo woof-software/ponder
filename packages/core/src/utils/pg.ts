@@ -59,7 +59,16 @@ const parseBaseConfig = (
   };
 };
 
-export function createPool(config: PoolConfig, logger: Logger) {
+export function createPool(
+  config: PoolConfig,
+  logger: Logger,
+  { setupSql }: { setupSql?: string } = {},
+) {
+  const connectionSetupSql = `
+    SET synchronous_commit = off;
+    SET idle_in_transaction_session_timeout = 3600000;
+    ${setupSql ?? ""}`;
+
   class Client extends pg.Client {
     // @ts-expect-error
     override connect(
@@ -67,19 +76,12 @@ export function createPool(config: PoolConfig, logger: Logger) {
     ): void | Promise<void> {
       if (callback) {
         super.connect(() => {
-          this.query(
-            `
-            SET synchronous_commit = off;
-            SET idle_in_transaction_session_timeout = 3600000;`,
-            callback,
-          );
+          this.query(connectionSetupSql, callback);
         });
       } else {
-        return super.connect().then(() =>
-          this.query(`
-            SET synchronous_commit = off;
-            SET idle_in_transaction_session_timeout = 3600000;`).then(() => {}),
-        );
+        return super
+          .connect()
+          .then(() => this.query(connectionSetupSql).then(() => {}));
       }
     }
   }
