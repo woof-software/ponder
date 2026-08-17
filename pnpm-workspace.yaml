@@ -12,4 +12,3 @@ autoInstallPeers: false
 enablePrePostScripts: true
 linkWorkspacePackages: deep
 strictPeerDependencies: false
-provenance: true

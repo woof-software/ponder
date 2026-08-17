@@ -2,12 +2,6 @@ name: Setup
 
 description: Ponder monorepo action setup
 
-inputs:
-  foundry:
-    description: Install Foundry
-    required: false
-    default: "true"
-
 runs:
   using: composite
   steps:
@@ -21,10 +15,8 @@ runs:
       with:
         cache: pnpm
         node-version: 24.8
-        registry-url: 'https://registry.npmjs.org'
 
     - name: Set up foundry
-      if: inputs.foundry == 'true'
       uses: foundry-rs/foundry-toolchain@v1
       with:
         version: "nightly-d75318c9c7a1c6af5404fe96f63ca890dcdd588d"

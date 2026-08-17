@@ -1,0 +1,70 @@
+name: Publish GitHub package
+
+run-name: Publish @woof-software/ponder@${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version (for example, 0.17.3-woof.1)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate release
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Packages can only be published from main."
+            exit 1
+          fi
+          if [[ ! "$PACKAGE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-woof\.[0-9]+$ ]]; then
+            echo "Version must match X.Y.Z-woof.N."
+            exit 1
+          fi
+
+      - name: Clone repository
+        uses: actions/checkout@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11.0.0
+
+      - name: Set up node
+        uses: actions/setup-node@v5
+        with:
+          cache: pnpm
+          node-version: 24.8
+          registry-url: https://npm.pkg.github.com
+          scope: "@woof-software"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm --filter "ponder..." build
+
+      - name: Prepare package
+        working-directory: packages/core
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          npm pkg set "name=@woof-software/ponder"
+          npm pkg set "version=$PACKAGE_VERSION"
+          npm pkg set "repository.url=https://github.com/woof-software/ponder.git"
+
+      - name: Publish
+        working-directory: packages/core
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm publish --access public --no-git-checks
