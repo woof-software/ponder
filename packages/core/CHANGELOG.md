@@ -1,5 +1,31 @@
 # ponder
 
+## 0.17.6
+
+### Patch Changes
+
+- [#2364](https://github.com/ponder-sh/ponder/pull/2364) [`6eab09f`](https://github.com/ponder-sh/ponder/commit/6eab09f5edb2b9f8a9a8ca370da4ed34d45ca3d5) Thanks [@kyscott18](https://github.com/kyscott18)! - Improved backfill sync performance by combining compatible JSON-RPC `eth_getLogs` requests.
+
+- [#2362](https://github.com/ponder-sh/ponder/pull/2362) [`34d930a`](https://github.com/ponder-sh/ponder/commit/34d930a3326ab53c746823a5cc221394bec29f03) Thanks [@kyscott18](https://github.com/kyscott18)! - Added validation for `address: []` in `ponder.config.ts`.
+
+## 0.17.5
+
+### Patch Changes
+
+- [#2360](https://github.com/ponder-sh/ponder/pull/2360) [`ae44b25`](https://github.com/ponder-sh/ponder/commit/ae44b258f9d9b901f5a0498f5f589e33ed9cf1b9) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused historical sync to request transaction receipts for logs with a zero transaction hash when `includeTransactionReceipts` was enabled.
+
+## 0.17.4
+
+### Patch Changes
+
+- [#2353](https://github.com/ponder-sh/ponder/pull/2353) [`a0a91c3`](https://github.com/ponder-sh/ponder/commit/a0a91c33039ec4d29173af22f59394cfc2c346c2) Thanks [@kyscott18](https://github.com/kyscott18)! - Improved indexing performance by batching internal metrics updates.
+
+- [#2356](https://github.com/ponder-sh/ponder/pull/2356) [`13d34ee`](https://github.com/ponder-sh/ponder/commit/13d34ee70f45117636a4dfa7e7a74e3a7d195462) Thanks [@kyscott18](https://github.com/kyscott18)! - Improved indexing performance by using schema-aware copying.
+
+- [#2355](https://github.com/ponder-sh/ponder/pull/2355) [`d34cf7e`](https://github.com/ponder-sh/ponder/commit/d34cf7e56579001ec1a814a974444a11f18adb1b) Thanks [@kyscott18](https://github.com/kyscott18)! - Improved indexing performance by normalizing only changed row fields during updates.
+
+- [#2352](https://github.com/ponder-sh/ponder/pull/2352) [`0183ecc`](https://github.com/ponder-sh/ponder/commit/0183eccf50e72be5ad5a321a0ad436649d5fbb50) Thanks [@kyscott18](https://github.com/kyscott18)! - Improved indexing performance by reducing copy-on-write row memory usage.
+
 ## 0.17.3
 
 ### Patch Changes
