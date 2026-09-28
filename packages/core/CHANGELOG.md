@@ -1,5 +1,11 @@
 # ponder
 
+## 0.17.13
+
+### Patch Changes
+
+- [`ab06808`](https://github.com/ponder-sh/ponder/commit/ab0680861bc98f0f5844b83f2bafce87beb76cd2) Thanks [@denis-st-woof-software](https://github.com/denis-st-woof-software)! - Fixed a bug that caused PostgreSQL memory usage to grow continuously during live indexing.
+
 ## 0.17.12
 
 ### Patch Changes
