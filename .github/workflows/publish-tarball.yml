@@ -1,6 +1,6 @@
-name: Publish GitHub package
+name: Publish tarball
 
-run-name: Publish @woof-software/ponder@${{ inputs.version }}
+run-name: Publish ponder@${{ inputs.version }}
 
 on:
   workflow_dispatch:
@@ -11,8 +11,7 @@ on:
         type: string
 
 permissions:
-  contents: read
-  packages: write
+  contents: write
 
 jobs:
   publish:
@@ -53,19 +52,21 @@ jobs:
         env:
           PACKAGE_VERSION: ${{ inputs.version }}
         run: |
-          npm pkg set "name=@woof-software/ponder"
           npm pkg set "version=$PACKAGE_VERSION"
           npm pkg set "repository.url=https://github.com/woof-software/ponder.git"
 
-      # pnpm 11 ignores the NPM_CONFIG_USERCONFIG file written by setup-node and reads ~/.npmrc.
-      - name: Configure registry
-        run: |
-          echo "@woof-software:registry=https://npm.pkg.github.com" >> ~/.npmrc
-          echo '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' >> ~/.npmrc
+      # pnpm pack, unlike npm pack, replaces workspace:* with the published @ponder/utils version.
+      - name: Pack
+        working-directory: packages/core
+        run: pnpm pack
 
-      # pnpm-workspace.yaml enables provenance, which GitHub Packages does not support.
-      - name: Publish
+      - name: Create release
         working-directory: packages/core
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm publish --no-git-checks --no-provenance
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          TARBALL="ponder-$PACKAGE_VERSION.tgz"
+          gh release create "v$PACKAGE_VERSION" "$TARBALL" --target "$GITHUB_SHA" \
+            --title "ponder $PACKAGE_VERSION" \
+            --notes "\"ponder\": \"https://github.com/$GITHUB_REPOSITORY/releases/download/v$PACKAGE_VERSION/$TARBALL\""
