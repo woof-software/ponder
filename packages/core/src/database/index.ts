@@ -17,6 +17,7 @@ import { hexToBigInt } from "viem";
 import {
   getLiveQueryNotifyProcedureName,
   getLiveQueryProcedureName,
+  getLiveQueryTempTableName,
   getPartitionName,
   getReorgSequenceName,
   getReorgTableName,
@@ -301,6 +302,9 @@ export const createDatabase = ({
           max: userMax,
         },
         common.logger,
+        {
+          setupSql: `CREATE TEMP TABLE ${getLiveQueryTempTableName()} (table_name TEXT PRIMARY KEY) ON COMMIT DELETE ROWS;`,
+        },
       ),
       readonly: createReadonlyPool(
         {

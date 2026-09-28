@@ -236,16 +236,7 @@ test("live query notify trigger batches large payloads", async () => {
     }
 
     await database.userQB.transaction(async (tx) => {
-      if (database.userQB.$dialect === "postgres") {
-        await tx.wrap((tx) =>
-          tx.execute(`DROP TABLE IF EXISTS ${getLiveQueryTempTableName()}`),
-        );
-        await tx.wrap((tx) =>
-          tx.execute(
-            `CREATE TEMP TABLE ${getLiveQueryTempTableName()} (table_name TEXT PRIMARY KEY) ON COMMIT DROP`,
-          ),
-        );
-      } else {
+      if (database.userQB.$dialect === "pglite") {
         await tx.wrap((tx) =>
           tx.execute(
             `CREATE TEMP TABLE IF NOT EXISTS ${getLiveQueryTempTableName()} (table_name TEXT PRIMARY KEY)`,
@@ -300,6 +291,96 @@ test("live query notify trigger batches large payloads", async () => {
   expect(
     notifications.every((payload) => Buffer.byteLength(payload) < 8000),
   ).toBe(true);
+});
+
+test("postgres live query temp table is reused transactionally", async () => {
+  const { database } = await setupDatabaseServices({
+    schemaBuild: { schema: { account } },
+  });
+  if (database.driver.dialect !== "postgres") return;
+
+  await database.userQB.wrap((tx) =>
+    tx.insert(getPonderCheckpointTable()).values({
+      chainName: "mainnet",
+      chainId: 1,
+      safeCheckpoint: createCheckpoint({ chainId: 1n, blockNumber: 0n }),
+      finalizedCheckpoint: createCheckpoint({ chainId: 1n, blockNumber: 0n }),
+      latestCheckpoint: createCheckpoint({ chainId: 1n, blockNumber: 0n }),
+    }),
+  );
+  await createLiveQueryTriggers(database.userQB, {
+    tables: [],
+    namespaceBuild: { schema: "public", viewsSchema: undefined },
+  });
+
+  const channel = getLiveQueryChannelName("public");
+  const notifications: string[] = [];
+  let resolve!: () => void;
+  const done = new Promise<void>((_resolve) => {
+    resolve = _resolve;
+  });
+  const listener = await database.driver.admin.connect();
+  const writer = await database.driver.user.connect();
+
+  try {
+    listener.on("notification", (notification) => {
+      if (notification.payload === undefined) return;
+      notifications.push(notification.payload);
+      if (notifications.length === 2) resolve();
+    });
+    await listener.query(`LISTEN "${channel}"`);
+
+    const getOid = async () =>
+      writer
+        .query<{ oid: string }>(
+          `SELECT 'pg_temp.${getLiveQueryTempTableName()}'::regclass::oid::text AS oid`,
+        )
+        .then(({ rows }) => rows[0]!.oid);
+    const getRowCount = async () =>
+      writer
+        .query<{ count: string }>(
+          `SELECT count(*)::text AS count FROM ${getLiveQueryTempTableName()}`,
+        )
+        .then(({ rows }) => Number(rows[0]!.count));
+    const updateCheckpoint = (blockNumber: bigint) =>
+      writer.query(
+        `UPDATE "_ponder_checkpoint" SET "latest_checkpoint" = $1 WHERE "chain_name" = $2`,
+        [createCheckpoint({ chainId: 1n, blockNumber }), "mainnet"],
+      );
+
+    const oid = await getOid();
+
+    await writer.query("BEGIN");
+    await writer.query(
+      `INSERT INTO ${getLiveQueryTempTableName()} (table_name) VALUES ('rolled_back')`,
+    );
+    await updateCheckpoint(1n);
+    await writer.query("ROLLBACK");
+
+    expect(await getRowCount()).toBe(0);
+
+    await writer.query("BEGIN");
+    await writer.query(
+      `INSERT INTO ${getLiveQueryTempTableName()} (table_name) VALUES ('committed')`,
+    );
+    await updateCheckpoint(2n);
+    await writer.query("COMMIT");
+
+    await updateCheckpoint(3n);
+    await done;
+
+    expect(notifications.map((payload) => JSON.parse(payload))).toStrictEqual([
+      ["committed"],
+      [],
+    ]);
+    expect(await getRowCount()).toBe(0);
+    expect(await getOid()).toBe(oid);
+  } finally {
+    await writer.query("ROLLBACK").catch(() => {});
+    await listener.query(`UNLISTEN "${channel}"`).catch(() => {});
+    listener.release();
+    writer.release();
+  }
 });
 
 test("commitBlock()", async () => {

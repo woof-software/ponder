@@ -553,17 +553,42 @@ export async function runIsolated({
           cachedViemClient.prefetch({ events: event.events }),
         ]);
 
+        if (
+          database.userQB.$dialect === "postgres" &&
+          event.events.length === 0
+        ) {
+          try {
+            await database.userQB.wrap(
+              { label: "update_checkpoints" },
+              (db) =>
+                db
+                  .update(PONDER_CHECKPOINT)
+                  .set({ latestCheckpoint: event.checkpoint })
+                  .where(eq(PONDER_CHECKPOINT.chainName, event.chain.name)),
+              context,
+            );
+          } catch (error) {
+            indexingCache.invalidate();
+            indexingCache.clear();
+            throw error;
+          }
+          event.blockCallback?.(true);
+
+          common.logger.info({
+            msg: "Indexed block",
+            chain: event.chain.name,
+            chain_id: event.chain.id,
+            number: Number(decodeCheckpoint(event.checkpoint).blockNumber),
+            event_count: 0,
+            duration: endClock(),
+          });
+
+          break;
+        }
+
         await database.userQB.transaction(
           async (tx) => {
-            if (database.userQB.$dialect === "postgres") {
-              await tx.wrap(
-                (tx) =>
-                  tx.execute(
-                    `CREATE TEMP TABLE ${getLiveQueryTempTableName()} (table_name TEXT PRIMARY KEY) ON COMMIT DROP`,
-                  ),
-                context,
-              );
-            } else {
+            if (database.userQB.$dialect === "pglite") {
               await tx.wrap(
                 (tx) =>
                   tx.execute(
