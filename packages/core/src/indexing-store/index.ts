@@ -1,5 +1,6 @@
 import {
   type Column,
+  getTableColumns,
   getTableName,
   getViewName,
   isTable,
@@ -35,7 +36,7 @@ import { prettyPrint } from "@/utils/print.js";
 import { getSQLQueryRelations, isReadonlySQLQuery } from "@/utils/sql-parse.js";
 import { startClock } from "@/utils/timer.js";
 import type { IndexingCache, Row } from "./cache.js";
-import { getPrimaryKeyCache } from "./utils.js";
+import { getPrimaryKeyCache, normalizeUpdateSet } from "./utils.js";
 
 export type IndexingStore = {
   db: Db<Schema>;
@@ -117,6 +118,14 @@ export const createIndexingStore = ({
   const tables = Object.values(schema).filter(isTable);
   const views = Object.values(schema).filter(isView);
   const primaryKeyCache = getPrimaryKeyCache(tables);
+  const isCopyFast = new Map(
+    tables.map((table) => [
+      table,
+      Object.values(getTableColumns(table)).every((column) =>
+        ["string", "number", "boolean", "bigint"].includes(column.dataType),
+      ),
+    ]),
+  );
 
   const lock = createLock();
 
@@ -161,10 +170,10 @@ export const createIndexingStore = ({
   return {
     db: {
       find: storeMethodWrapper(async (table: Table, key) => {
-        common.metrics.ponder_indexing_store_queries_total.inc({
-          table: getTableName(table),
-          method: "find",
-        });
+        common.metrics.incrementIndexingStoreQueries(
+          getTableName(table),
+          "find",
+        );
         checkOnchainTable(table, "find");
         checkTableAccess(table, "find", key, chainId);
         const ponderRow = await indexingCache.get({ table, key });
@@ -177,13 +186,17 @@ export const createIndexingStore = ({
           values: (userValues: any) => {
             const inner = {
               onConflictDoNothing: storeMethodWrapper(async () => {
-                common.metrics.ponder_indexing_store_queries_total.inc({
-                  table: getTableName(table),
-                  method: "insert",
-                });
+                common.metrics.incrementIndexingStoreQueries(
+                  getTableName(table),
+                  "insert",
+                );
                 checkOnchainTable(table, "insert");
 
-                const ponderValues = copy(userValues);
+                const ponderValues = Array.isArray(userValues)
+                  ? userValues.map((value) =>
+                      copy(value, isCopyFast.get(table)!),
+                    )
+                  : copy(userValues, isCopyFast.get(table)!);
 
                 if (Array.isArray(ponderValues)) {
                   const ponderRows = [];
@@ -232,10 +245,10 @@ export const createIndexingStore = ({
               }),
               onConflictDoUpdate: storeMethodWrapper(
                 async (userUpdateValues: any) => {
-                  common.metrics.ponder_indexing_store_queries_total.inc({
-                    table: getTableName(table),
-                    method: "insert",
-                  });
+                  common.metrics.incrementIndexingStoreQueries(
+                    getTableName(table),
+                    "insert",
+                  );
                   checkOnchainTable(table, "insert");
 
                   if (Array.isArray(userValues)) {
@@ -248,17 +261,24 @@ export const createIndexingStore = ({
                       });
 
                       if (ponderRowUpdate) {
-                        ponderRowUpdate = copy(ponderRowUpdate);
+                        ponderRowUpdate = copy(
+                          ponderRowUpdate,
+                          isCopyFast.get(table)!,
+                        );
                         if (typeof userUpdateValues === "function") {
                           const userRowUpdate = copyOnWrite(ponderRowUpdate);
                           const userSet = userUpdateValues(userRowUpdate);
-                          const ponderSet = copy(userSet);
+                          const ponderSet = copy(
+                            userSet,
+                            isCopyFast.get(table)!,
+                          );
                           validateUpdateSet(
                             table,
                             ponderSet,
                             ponderRowUpdate,
                             primaryKeyCache,
                           );
+                          normalizeUpdateSet(table, ponderSet);
                           for (const [key, value] of Object.entries(
                             ponderSet,
                           )) {
@@ -267,13 +287,17 @@ export const createIndexingStore = ({
                           }
                         } else {
                           const userSet = userUpdateValues;
-                          const ponderSet = copy(userSet);
+                          const ponderSet = copy(
+                            userSet,
+                            isCopyFast.get(table)!,
+                          );
                           validateUpdateSet(
                             table,
                             ponderSet,
                             ponderRowUpdate,
                             primaryKeyCache,
                           );
+                          normalizeUpdateSet(table, ponderSet);
                           for (const [key, value] of Object.entries(
                             ponderSet,
                           )) {
@@ -290,7 +314,7 @@ export const createIndexingStore = ({
                           }),
                         );
                       } else {
-                        const ponderValue = copy(value);
+                        const ponderValue = copy(value, isCopyFast.get(table)!);
                         ponderRows.push(
                           indexingCache.set({
                             table,
@@ -313,30 +337,35 @@ export const createIndexingStore = ({
                     });
 
                     if (ponderRowUpdate) {
-                      ponderRowUpdate = copy(ponderRowUpdate);
+                      ponderRowUpdate = copy(
+                        ponderRowUpdate,
+                        isCopyFast.get(table)!,
+                      );
                       if (typeof userUpdateValues === "function") {
                         const userRowUpdate = copyOnWrite(ponderRowUpdate);
                         const userSet = userUpdateValues(userRowUpdate);
-                        const ponderSet = copy(userSet);
+                        const ponderSet = copy(userSet, isCopyFast.get(table)!);
                         validateUpdateSet(
                           table,
                           ponderSet,
                           ponderRowUpdate,
                           primaryKeyCache,
                         );
+                        normalizeUpdateSet(table, ponderSet);
                         for (const [key, value] of Object.entries(ponderSet)) {
                           if (value === undefined) continue;
                           ponderRowUpdate[key] = value;
                         }
                       } else {
                         const userSet = userUpdateValues;
-                        const ponderSet = copy(userSet);
+                        const ponderSet = copy(userSet, isCopyFast.get(table)!);
                         validateUpdateSet(
                           table,
                           ponderSet,
                           ponderRowUpdate,
                           primaryKeyCache,
                         );
+                        normalizeUpdateSet(table, ponderSet);
                         for (const [key, value] of Object.entries(ponderSet)) {
                           if (value === undefined) continue;
                           ponderRowUpdate[key] = value;
@@ -352,7 +381,10 @@ export const createIndexingStore = ({
                       return userRow;
                     }
 
-                    const ponderValues = copy(userValues);
+                    const ponderValues = copy(
+                      userValues,
+                      isCopyFast.get(table)!,
+                    );
 
                     const ponderRowInsert = indexingCache.set({
                       table,
@@ -369,12 +401,16 @@ export const createIndexingStore = ({
               // biome-ignore lint/suspicious/noThenProperty: The returned object is intentionally thenable for the query API.
               then: (onFulfilled, onRejected) =>
                 storeMethodWrapper(async () => {
-                  common.metrics.ponder_indexing_store_queries_total.inc({
-                    table: getTableName(table),
-                    method: "insert",
-                  });
+                  common.metrics.incrementIndexingStoreQueries(
+                    getTableName(table),
+                    "insert",
+                  );
                   checkOnchainTable(table, "insert");
-                  const ponderValues = copy(userValues);
+                  const ponderValues = Array.isArray(userValues)
+                    ? userValues.map((value) =>
+                        copy(value, isCopyFast.get(table)!),
+                      )
+                    : copy(userValues, isCopyFast.get(table)!);
 
                   if (Array.isArray(ponderValues)) {
                     const ponderRows = [];
@@ -418,10 +454,7 @@ export const createIndexingStore = ({
                     const userRows = ponderRows.map((row) =>
                       row === null ? row : copyOnWrite(row),
                     );
-                    return Promise.resolve(userRows).then(
-                      onFulfilled,
-                      onRejected,
-                    );
+                    return userRows;
                   } else {
                     checkTableAccess(table, "insert", ponderValues, chainId);
 
@@ -456,10 +489,7 @@ export const createIndexingStore = ({
                       });
                     }
                     const userRow = copyOnWrite(ponderRow);
-                    return Promise.resolve(userRow).then(
-                      onFulfilled,
-                      onRejected,
-                    );
+                    return userRow;
                   }
                 })().then(onFulfilled, onRejected),
               catch: (onRejected): Promise<any> =>
@@ -488,10 +518,10 @@ export const createIndexingStore = ({
       update(table: Table, key) {
         return {
           set: storeMethodWrapper(async (userValues: any) => {
-            common.metrics.ponder_indexing_store_queries_total.inc({
-              table: getTableName(table),
-              method: "update",
-            });
+            common.metrics.incrementIndexingStoreQueries(
+              getTableName(table),
+              "update",
+            );
             checkOnchainTable(table, "update");
             checkTableAccess(table, "update", key, chainId);
 
@@ -507,31 +537,33 @@ export const createIndexingStore = ({
               throw error;
             }
 
-            ponderRowUpdate = copy(ponderRowUpdate);
+            ponderRowUpdate = copy(ponderRowUpdate, isCopyFast.get(table)!);
 
             if (typeof userValues === "function") {
               const userRow = copyOnWrite(ponderRowUpdate);
               const userSet = userValues(userRow);
-              const ponderSet = copy(userSet);
+              const ponderSet = copy(userSet, isCopyFast.get(table)!);
               validateUpdateSet(
                 table,
                 ponderSet,
                 ponderRowUpdate,
                 primaryKeyCache,
               );
+              normalizeUpdateSet(table, ponderSet);
               for (const [key, value] of Object.entries(ponderSet)) {
                 if (value === undefined) continue;
                 ponderRowUpdate[key] = value;
               }
             } else {
               const userSet = userValues;
-              const ponderSet = copy(userSet);
+              const ponderSet = copy(userSet, isCopyFast.get(table)!);
               validateUpdateSet(
                 table,
                 ponderSet,
                 ponderRowUpdate,
                 primaryKeyCache,
               );
+              normalizeUpdateSet(table, ponderSet);
               for (const [key, value] of Object.entries(ponderSet)) {
                 if (value === undefined) continue;
                 ponderRowUpdate[key] = value;
@@ -550,10 +582,10 @@ export const createIndexingStore = ({
         };
       },
       delete: storeMethodWrapper(async (table: Table, key) => {
-        common.metrics.ponder_indexing_store_queries_total.inc({
-          table: getTableName(table),
-          method: "delete",
-        });
+        common.metrics.incrementIndexingStoreQueries(
+          getTableName(table),
+          "delete",
+        );
         checkOnchainTable(table, "delete");
         checkTableAccess(table, "delete", key, chainId);
         return indexingCache.delete({ table, key });
