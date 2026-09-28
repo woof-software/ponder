@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createClient } from "@ponder/client";
 import { expect, test } from "vitest";
 import { eq, onchainTable, relations } from "@/index.js";
@@ -38,6 +39,23 @@ test("getSQLQueryRelations", async () => {
   `);
 });
 
+test("getSQLQueryRelations() cache identity", async () => {
+  const first = "SELECT 1 /*Ap0yb*/";
+  const second = "SELECT * FROM _ponder_checkpoint /*Bd6bu*/";
+  const firstHash = createHash("sha256").update(first).digest("hex");
+  const secondHash = createHash("sha256").update(second).digest("hex");
+
+  expect(firstHash.slice(0, 10)).toBe(secondHash.slice(0, 10));
+  expect(firstHash).not.toBe(secondHash);
+
+  const firstRelations = await getSQLQueryRelations(first);
+  const secondRelations = await getSQLQueryRelations(second);
+
+  expect(firstRelations).toEqual(new Set());
+  expect(secondRelations).toEqual(new Set(["_ponder_checkpoint"]));
+  expect(firstRelations).not.toEqual(secondRelations);
+});
+
 test("validateAllowableSQLQuery()", async () => {
   await validateAllowableSQLQuery("SELECT * FROM users;");
   await validateAllowableSQLQuery("SELECT u.name FROM users as u;");
@@ -68,6 +86,21 @@ test("validateAllowableSQLQuery() cache", async () => {
   await expect(
     validateAllowableSQLQuery(`SET statement_timeout = '1s';`),
   ).rejects.toThrow();
+});
+
+test("validateAllowableSQLQuery() cache identity", async () => {
+  const first = "SELECT 1 /*1665502*/";
+  const second = "SELECT * FROM pg_stat_activity /*536102*/";
+  const firstHash = createHash("sha256").update(first).digest("hex");
+  const secondHash = createHash("sha256").update(second).digest("hex");
+
+  expect(firstHash.slice(0, 10)).toBe(secondHash.slice(0, 10));
+  expect(firstHash).not.toBe(secondHash);
+
+  await validateAllowableSQLQuery(first);
+  await expect(validateAllowableSQLQuery(second)).rejects.toThrow(
+    "System tables not supported",
+  );
 });
 
 test("validateAllowableSQLQuery() select into", async () => {

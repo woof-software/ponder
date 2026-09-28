@@ -20,7 +20,10 @@ import type {
 } from "@/internal/types.js";
 import type { RequestParameters, Rpc } from "@/rpc/index.js";
 import { zeroLogsBloom } from "@/sync-realtime/bloom.js";
+import { chunk } from "@/utils/chunk.js";
 import { PG_BIGINT_MAX, PG_INTEGER_MAX } from "@/utils/pg.js";
+
+const ADDRESS_CHUNK_SIZE = 50;
 
 /**
  * Helper function for "eth_getBlockByNumber" request.
@@ -93,13 +96,29 @@ export const eth_getLogs = async (
     params,
   };
 
-  return rpc.request(request, context).then((logs) => {
-    if (logs === null || logs === undefined) {
-      throw new Error("Received invalid empty eth_getLogs response.");
-    }
+  const requests: Extract<RequestParameters, { method: "eth_getLogs" }>[] =
+    Array.isArray(params[0].address)
+      ? chunk(params[0].address, ADDRESS_CHUNK_SIZE).map(
+          (address) =>
+            ({
+              method: "eth_getLogs",
+              params: [{ ...params[0], address }],
+            }) as Extract<RequestParameters, { method: "eth_getLogs" }>,
+        )
+      : [request];
 
-    return standardizeLogs(logs as SyncLog[], request);
-  });
+  const responses = await Promise.all(
+    requests.map(async (request) => {
+      const logs = await rpc.request(request, context);
+      if (logs === null || logs === undefined) {
+        throw new Error("Received invalid empty eth_getLogs response.");
+      }
+
+      return logs as SyncLog[];
+    }),
+  );
+
+  return standardizeLogs(responses.flat(), request);
 };
 
 /**
@@ -350,6 +369,7 @@ export const validateTransactionsAndBlock = (
  *
  * @dev Allows `log.transactionHash` to be `zeroHash`.
  * @dev Allows `block.logsBloom` to be `zeroLogsBloom`.
+ * @dev Skips bloom validation on async-execution chains.
  */
 export const validateLogsAndBlock = (
   logs: SyncLog[],
@@ -359,8 +379,13 @@ export const validateLogsAndBlock = (
     RequestParameters,
     { method: "eth_getBlockByNumber" | "eth_getBlockByHash" }
   >,
+  isAsyncExecutionChain: boolean,
 ) => {
-  if (block.logsBloom !== zeroLogsBloom && logs.length === 0) {
+  if (
+    isAsyncExecutionChain === false &&
+    block.logsBloom !== zeroLogsBloom &&
+    logs.length === 0
+  ) {
     const error = new RpcProviderError(
       `Inconsistent RPC response data. The logs array has length 0, but the associated block has a non-empty 'block.logsBloom'.`,
     );

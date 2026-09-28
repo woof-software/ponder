@@ -204,6 +204,7 @@ test("live query notify trigger batches large payloads", async () => {
 
   const channel = getLiveQueryChannelName("public");
   const notifications: string[] = [];
+  let unsubscribe: (() => void) | undefined;
   let resolve!: () => void;
   const done = new Promise<void>((_resolve) => {
     resolve = _resolve;
@@ -216,7 +217,7 @@ test("live query notify trigger batches large payloads", async () => {
 
   if (database.driver.dialect === "pglite") {
     await database.driver.instance.query(`LISTEN "${channel}"`);
-    database.driver.instance.onNotification((_, payload) =>
+    unsubscribe = database.driver.instance.onNotification((_, payload) =>
       onNotification(payload),
     );
   }
@@ -275,6 +276,7 @@ test("live query notify trigger batches large payloads", async () => {
     await done;
   } finally {
     if (database.driver.dialect === "pglite") {
+      unsubscribe?.();
       await database.driver.instance.query(`UNLISTEN "${channel}"`);
     } else if (client) {
       await client.query(`UNLISTEN "${channel}"`);
@@ -613,6 +615,71 @@ test("empty schema", async () => {
 
     namespaceBuild: { schema: "public", viewsSchema: undefined },
   });
+});
+
+test("finalizeMultichain() with empty schema only updates matching chain", async () => {
+  const { database } = await setupDatabaseServices({
+    schemaBuild: { schema: {} },
+  });
+  const checkpointTable = getPonderCheckpointTable();
+  const mainnetCheckpoint = createCheckpoint({
+    chainId: 1n,
+    blockNumber: 1n,
+  });
+  const optimismCheckpoint = createCheckpoint({
+    chainId: 10n,
+    blockNumber: 1n,
+  });
+  const finalizedCheckpoint = createCheckpoint({
+    chainId: 1n,
+    blockNumber: 10n,
+  });
+
+  await database.userQB.wrap((db) =>
+    db.insert(checkpointTable).values([
+      {
+        chainName: "mainnet",
+        chainId: 1,
+        safeCheckpoint: mainnetCheckpoint,
+        finalizedCheckpoint: mainnetCheckpoint,
+        latestCheckpoint: mainnetCheckpoint,
+      },
+      {
+        chainName: "optimism",
+        chainId: 10,
+        safeCheckpoint: optimismCheckpoint,
+        finalizedCheckpoint: optimismCheckpoint,
+        latestCheckpoint: optimismCheckpoint,
+      },
+    ]),
+  );
+
+  await finalizeMultichain(database.userQB, {
+    tables: [],
+    checkpoint: finalizedCheckpoint,
+    namespaceBuild: { schema: "public", viewsSchema: undefined },
+  });
+
+  const checkpoints = await database.userQB.wrap((db) =>
+    db.select().from(checkpointTable).orderBy(checkpointTable.chainId),
+  );
+
+  expect(checkpoints).toStrictEqual([
+    {
+      chainName: "mainnet",
+      chainId: 1,
+      safeCheckpoint: finalizedCheckpoint,
+      latestCheckpoint: mainnetCheckpoint,
+      finalizedCheckpoint,
+    },
+    {
+      chainName: "optimism",
+      chainId: 10,
+      safeCheckpoint: optimismCheckpoint,
+      latestCheckpoint: optimismCheckpoint,
+      finalizedCheckpoint: optimismCheckpoint,
+    },
+  ]);
 });
 
 async function getUserIndexNames(

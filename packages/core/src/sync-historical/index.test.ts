@@ -1,7 +1,14 @@
-import { zeroAddress } from "viem";
+import {
+  getAbiItem,
+  type Hex,
+  toEventSelector,
+  zeroAddress,
+  zeroHash,
+} from "viem";
 import { parseEther } from "viem/utils";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ALICE, BOB } from "@/_test/constants.js";
+import { erc20ABI } from "@/_test/generated.js";
 import {
   context,
   setupAnvil,
@@ -61,6 +68,66 @@ test("createHistoricalSync()", async () => {
   });
 
   expect(historicalSync).toBeDefined();
+});
+
+test("sync() batches log filters with wildcard indexed topics", async () => {
+  const { syncStore } = await setupDatabaseServices();
+
+  const chain = {
+    ...getChain(),
+    ethGetLogsBlockRange: 1_000,
+  };
+  const contractAddress = "0x9eb95e4b47aeccb131f20ae7af33a29832499067" as const;
+  const approval = toEventSelector(
+    getAbiItem({ abi: erc20ABI, name: "Approval" }),
+  );
+  const transfer = toEventSelector(
+    getAbiItem({ abi: erc20ABI, name: "Transfer" }),
+  );
+  const rpc = createRpc({ chain, common: context.common });
+  const requestSpy = vi.spyOn(rpc, "request");
+  requestSpy.mockResolvedValue([] as never);
+
+  const historicalSync = createHistoricalSync({
+    common: context.common,
+    chain,
+    rpc,
+    childAddresses: new Map(),
+  });
+
+  const { filter: baseFilter } = getErc20IndexingBuild({
+    address: contractAddress,
+  }).eventCallbacks[0]!;
+  const createLogFilter = (topic0: Hex) => ({ ...baseFilter, topic0 });
+
+  await historicalSync.syncBlockRangeData({
+    interval: [1, 2],
+    requiredIntervals: [
+      {
+        filter: createLogFilter(approval),
+        interval: [1, 2],
+      },
+      {
+        filter: createLogFilter(transfer),
+        interval: [1, 2],
+      },
+    ],
+    requiredFactoryIntervals: [],
+    syncStore,
+  });
+
+  expect(requestSpy).toHaveBeenCalledTimes(1);
+  expect(requestSpy.mock.calls[0]![0]).toMatchObject({
+    method: "eth_getLogs",
+    params: [
+      {
+        address: contractAddress,
+        topics: [[approval, transfer]],
+        fromBlock: "0x1",
+        toBlock: "0x2",
+      },
+    ],
+  });
 });
 
 test("sync() with log filter", async () => {
@@ -196,6 +263,80 @@ test.skipIf(process.env.USER === "jaymiller")(
     expect(intervals).toHaveLength(1);
   },
 );
+
+test("sync() skips transaction receipts for zero-hash logs", async () => {
+  const { syncStore } = await setupDatabaseServices();
+
+  const chain = getChain();
+  const rpc = createRpc({
+    chain,
+    common: context.common,
+  });
+
+  const { address } = await deployErc20({ sender: ALICE });
+  await mintErc20({
+    erc20: address,
+    to: ALICE,
+    amount: parseEther("1"),
+    sender: ALICE,
+  });
+
+  const { eventCallbacks } = getErc20IndexingBuild({
+    address,
+    includeTransactionReceipts: true,
+  });
+
+  const requestSpy = vi.spyOn(rpc, "request");
+  const request = async (request: any) => {
+    const result = await rpc.request(request);
+    if (request.method === "eth_getLogs") {
+      return (result as { transactionHash: string }[]).map((log) => ({
+        ...log,
+        transactionHash: zeroHash,
+      }));
+    }
+    return result;
+  };
+
+  const historicalSync = createHistoricalSync({
+    common: context.common,
+    chain,
+    rpc: {
+      ...rpc,
+      // @ts-expect-error
+      request,
+    },
+    childAddresses: setupChildAddresses(eventCallbacks),
+  });
+
+  const requiredIntervals = getRequiredIntervalsWithFilters({
+    interval: [1, 2],
+    filters: eventCallbacks.map(({ filter }) => filter),
+    cachedIntervals: setupCachedIntervals(eventCallbacks),
+  });
+  const logs = await historicalSync.syncBlockRangeData({
+    interval: [1, 2],
+    requiredIntervals: requiredIntervals.intervals,
+    requiredFactoryIntervals: requiredIntervals.factoryIntervals,
+    syncStore,
+  });
+  await historicalSync.syncBlockData({
+    interval: [1, 2],
+    requiredIntervals: requiredIntervals.intervals,
+    logs,
+    syncStore,
+  });
+
+  expect(logs).toHaveLength(1);
+  expect(logs[0]?.transactionHash).toBe(zeroHash);
+
+  const receiptRequests = requestSpy.mock.calls.filter(
+    ([request]) =>
+      request.method === "eth_getBlockReceipts" ||
+      request.method === "eth_getTransactionReceipt",
+  );
+  expect(receiptRequests).toHaveLength(0);
+});
 
 test("sync() with block filter", async () => {
   const { syncStore, database } = await setupDatabaseServices();
