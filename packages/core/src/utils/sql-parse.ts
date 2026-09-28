@@ -56,11 +56,7 @@ export const parseSQLQuery = async (sql: string): Promise<Node> => {
 export const validateAllowableSQLQuery = async (sql: string) => {
   const crypto = await import(/* webpackIgnore: true */ "node:crypto");
 
-  const hash = crypto
-    .createHash("sha256")
-    .update(sql)
-    .digest("hex")
-    .slice(0, 10);
+  const hash = crypto.createHash("sha256").update(sql).digest("hex");
 
   if (ALLOW_CACHE.has(hash)) {
     const result = ALLOW_CACHE.get(hash)!;
@@ -152,17 +148,12 @@ export const isReadonlySQLQuery = async (sql: string): Promise<boolean> => {
 export const getSQLQueryRelations = async (
   sql: string,
 ): Promise<Set<string>> => {
-  const crypto = await import(/* webpackIgnore: true */ "node:crypto");
-
   if (sql.length > 5_000) {
     throw new Error("Invalid query");
   }
 
-  const hash = crypto
-    .createHash("sha256")
-    .update(sql)
-    .digest("hex")
-    .slice(0, 10);
+  const crypto = await import(/* webpackIgnore: true */ "node:crypto");
+  const hash = crypto.createHash("sha256").update(sql).digest("hex");
 
   if (RELATIONS_CACHE.has(hash)) {
     const result = RELATIONS_CACHE.get(hash)!;

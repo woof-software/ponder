@@ -1,5 +1,49 @@
 # ponder
 
+## 0.17.12
+
+### Patch Changes
+
+- [#2395](https://github.com/ponder-sh/ponder/pull/2395) [`b744cb1`](https://github.com/ponder-sh/ponder/commit/b744cb1678285df9e9a45e4e5ec704eaabb2f4ee) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug with `context.client` prediction.
+
+- [#2397](https://github.com/ponder-sh/ponder/pull/2397) [`0ee6c25`](https://github.com/ponder-sh/ponder/commit/0ee6c251ddcd82df4ae7eaac219401bef0b5f774) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused changes to a row returned by `context.db` to be lost when the row was passed back to `context.db.insert()` or `context.db.update()`. The original values were written instead.
+
+- [#2398](https://github.com/ponder-sh/ponder/pull/2398) [`f9859e7`](https://github.com/ponder-sh/ponder/commit/f9859e786d28e73672574623827a654515516d7b) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused a callback passed to `.then()` on `context.db.insert()` to run twice.
+
+## 0.17.11
+
+### Patch Changes
+
+- [#2390](https://github.com/ponder-sh/ponder/pull/2390) [`eefc29d`](https://github.com/ponder-sh/ponder/commit/eefc29d77fb42c3d0e7edec8e422ad2d330f33e8) Thanks [@JamieLivi](https://github.com/JamieLivi)! - Fixed a bug that caused live indexing on Avalanche C-Chain after the Helicon upgrade to skip logs. Fixed incorrect RPC inconsistency errors and bloom warnings on Avalanche and Monad.
+
+## 0.17.10
+
+### Patch Changes
+
+- [#2380](https://github.com/ponder-sh/ponder/pull/2380) [`1cb59b9`](https://github.com/ponder-sh/ponder/commit/1cb59b997009fe9cf465bfd8aa7fc0ddd066b89d) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed an issue in SQL-over-HTTP validation that could incorrectly reuse validation results for different queries with colliding cache keys.
+
+## 0.17.9
+
+### Patch Changes
+
+- [#2377](https://github.com/ponder-sh/ponder/pull/2377) [`f0f413d`](https://github.com/ponder-sh/ponder/commit/f0f413da6144eab9c48824c4130c7582229bfaa4) Thanks [@DicksonWu654](https://github.com/DicksonWu654)! - Fixed a bug that caused SQL-over-HTTP cache invalidation and live updates to use the wrong table dependencies.
+
+- [#2378](https://github.com/ponder-sh/ponder/pull/2378) [`25b6697`](https://github.com/ponder-sh/ponder/commit/25b66975cec9fe52f95032092c51a915faee3348) Thanks [@DicksonWu654](https://github.com/DicksonWu654)! - Fixed a bug that caused crash recovery to fail with `Finalized block for chain "<id>" cannot move backwards` in `ordering: "multichain"` apps with empty schemas.
+
+- [#2376](https://github.com/ponder-sh/ponder/pull/2376) [`3e092e2`](https://github.com/ponder-sh/ponder/commit/3e092e28eee8c7e4e1cc24a1977f4570ff7af779) Thanks [@DicksonWu654](https://github.com/DicksonWu654)! - Fixed a bug that caused failed `/sql/live` requests to exhaust the live query limit.
+
+## 0.17.8
+
+### Patch Changes
+
+- [#2366](https://github.com/ponder-sh/ponder/pull/2366) [`bbcaa43`](https://github.com/ponder-sh/ponder/commit/bbcaa43982b92cbfd1d4b91f66a0b4ae824c3d43) Thanks [@kyscott18](https://github.com/kyscott18)! - Improved backfill sync performance by merging more compatible JSON-RPC `eth_getLogs` requests.
+
+## 0.17.7
+
+### Patch Changes
+
+- [#2370](https://github.com/ponder-sh/ponder/pull/2370) [`e60a608`](https://github.com/ponder-sh/ponder/commit/e60a608b8a001511a6d62e825db73269a2ee669e) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed the error `TypeError: Cannot read properties of undefined (reading 'getSelectedFields')` that occurred during startup.
+
 ## 0.17.6
 
 ### Patch Changes
