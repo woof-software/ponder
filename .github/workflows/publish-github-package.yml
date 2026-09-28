@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Package version (for example, 0.17.3-woof.1)
+        description: Package version, the current ponder version with a -woof.N suffix (for example, 0.17.12-woof.1)
         required: true
         type: string
 
@@ -19,6 +19,9 @@ jobs:
     name: Publish
     runs-on: ubuntu-latest
     steps:
+      - name: Clone repository
+        uses: actions/checkout@v5
+
       - name: Validate release
         env:
           PACKAGE_VERSION: ${{ inputs.version }}
@@ -31,25 +34,16 @@ jobs:
             echo "Version must match X.Y.Z-woof.N."
             exit 1
           fi
+          BASE_VERSION=$(jq -r .version packages/core/package.json)
+          if [[ "${PACKAGE_VERSION%-woof.*}" != "$BASE_VERSION" ]]; then
+            echo "Version must start with the current ponder version $BASE_VERSION."
+            exit 1
+          fi
 
-      - name: Clone repository
-        uses: actions/checkout@v5
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v3
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          version: 11.0.0
-
-      - name: Set up node
-        uses: actions/setup-node@v5
-        with:
-          cache: pnpm
-          node-version: 24.8
-          registry-url: https://npm.pkg.github.com
-          scope: "@woof-software"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          foundry: "false"
 
       - name: Build
         run: pnpm --filter "ponder..." build
@@ -63,8 +57,15 @@ jobs:
           npm pkg set "version=$PACKAGE_VERSION"
           npm pkg set "repository.url=https://github.com/woof-software/ponder.git"
 
+      # pnpm 11 ignores the NPM_CONFIG_USERCONFIG file written by setup-node and reads ~/.npmrc.
+      - name: Configure registry
+        run: |
+          echo "@woof-software:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          echo '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' >> ~/.npmrc
+
+      # pnpm-workspace.yaml enables provenance, which GitHub Packages does not support.
       - name: Publish
         working-directory: packages/core
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm publish --access public --no-git-checks
+        run: pnpm publish --no-git-checks --no-provenance
