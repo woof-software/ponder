@@ -37,15 +37,23 @@ test("createRpc() handles rate limiting", async () => {
 });
 
 test("createRpc() raises the rps limit after rate limits", async () => {
+  const nextTick = setImmediate;
   vi.useFakeTimers();
   onTestFinished(() => {
     vi.useRealTimers();
   });
+  const advance = async (ms: number) => {
+    for (let elapsed = 0; elapsed < ms; elapsed += 20) {
+      vi.advanceTimersByTime(20);
+      await new Promise((resolve) => nextTick(resolve));
+    }
+  };
 
   let failures = 0;
   const requestsPerSecond = new Map<number, number>();
   const rpc = createRpc({
     common: context.common,
+    concurrency: 1,
     chain: {
       ...getChain(),
       rpc: custom({
@@ -68,21 +76,28 @@ test("createRpc() raises the rps limit after rate limits", async () => {
   for (let i = 0; i < 3; i++) {
     failures = 8;
     const request = rpc.request({ method: "eth_blockNumber" });
-    await vi.advanceTimersByTimeAsync(40_000);
+    await advance(40_000);
     await request;
   }
   requestsPerSecond.clear();
 
-  for (let i = 0; i < 500; i++) {
-    rpc.request({ method: "eth_blockNumber" });
-  }
-  await vi.advanceTimersByTimeAsync(5_000);
+  let isSettled = false;
+  Promise.all(
+    Array.from({ length: 500 }, () =>
+      rpc.request({ method: "eth_blockNumber" }),
+    ),
+  ).then(() => {
+    isSettled = true;
+  });
+  await advance(5_000);
 
   expect(Math.max(...requestsPerSecond.values())).toBe(5);
 
-  await vi.advanceTimersByTimeAsync(55_000);
+  await advance(55_000);
 
   expect(Math.max(...requestsPerSecond.values())).toBeGreaterThan(5);
+
+  while (isSettled === false) await advance(1_000);
 });
 
 test("createRpc() retry BlockNotFoundError", async () => {
