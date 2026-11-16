@@ -6,6 +6,7 @@ import type {
   Event,
   EventCallback,
   Factory,
+  FactoryFragmentId,
   Filter,
   IndexingBuild,
   SyncBlock,
@@ -145,6 +146,14 @@ export async function* getRealtimeEventsOmnichain(params: {
   let executedEvents: Event[] = [];
   /** Events that have not been executed. */
   let pendingEvents: Event[] = params.pendingEvents;
+  // Note: With a single live chain, a reorg never reads its executed events.
+  const liveChainIds = new Set(
+    Array.from(params.perChainSync)
+      .filter(([, { syncProgress }]) => syncProgress.isEnd() === false)
+      .map(([chain]) => chain.id),
+  );
+  const isExecutedEventKept = (event: Event) =>
+    liveChainIds.size > 1 || liveChainIds.has(event.chain.id) === false;
   /** Closest-to-tip finalized checkpoint across all chains. */
   let finalizedCheckpoint = ZERO_CHECKPOINT_STRING;
 
@@ -230,7 +239,9 @@ export async function* getRealtimeEventsOmnichain(params: {
         pendingEvents = pendingEvents
           .concat(decodedEvents)
           .filter((e) => e.checkpoint > checkpoint);
-        executedEvents = executedEvents.concat(readyEvents);
+        for (const event of readyEvents) {
+          if (isExecutedEventKept(event)) executedEvents.push(event);
+        }
 
         yield {
           type: "block",
@@ -411,6 +422,8 @@ export async function* getRealtimeEventsMultichain(params: {
   let executedEvents: Event[] = [];
   /** Events that have not been executed. */
   let pendingEvents: Event[] = [];
+  // Note: With a single live chain, a reorg never reads executed events.
+  const isExecutedEventKept = eventGenerators.length > 1;
 
   for await (const { chain, event } of mergeAsyncGenerators(eventGenerators)) {
     const { syncProgress, childAddresses, unfinalizedBlocks } =
@@ -496,7 +509,9 @@ export async function* getRealtimeEventsMultichain(params: {
           .concat(pendingEvents)
           .sort((a, b) => (a.checkpoint < b.checkpoint ? -1 : 1));
         pendingEvents = [];
-        executedEvents = executedEvents.concat(readyEvents);
+        if (isExecutedEventKept) {
+          for (const event of readyEvents) executedEvents.push(event);
+        }
 
         yield {
           type: "block",
@@ -937,21 +952,21 @@ export async function handleRealtimeSyncEvent(
         } else break;
       }
 
-      if (params.chain.disableCache) break;
+      if (params.chain.cacheRpcRequests === false) break;
 
       // Add finalized blocks, logs, transactions, receipts, and traces to the sync-store.
 
-      const childAddresses = new Map<Factory, Map<Address, number>>();
+      const childAddresses = new Map<FactoryFragmentId, Map<Address, number>>();
 
       for (const block of finalizedBlocks) {
-        for (const [factory, addresses] of block.childAddresses) {
-          if (childAddresses.has(factory) === false) {
-            childAddresses.set(factory, new Map());
+        for (const [fragmentId, addresses] of block.childAddresses) {
+          if (childAddresses.has(fragmentId) === false) {
+            childAddresses.set(fragmentId, new Map());
           }
           for (const address of addresses) {
-            if (childAddresses.get(factory)!.has(address) === false) {
+            if (childAddresses.get(fragmentId)!.has(address) === false) {
               childAddresses
-                .get(factory)!
+                .get(fragmentId)!
                 .set(address, hexToNumber(block.block.number));
             }
           }
@@ -1002,14 +1017,10 @@ export async function handleRealtimeSyncEvent(
               ),
               chainId: params.chain.id,
             }),
-            ...Array.from(childAddresses.entries()).map(
-              ([factory, childAddresses]) =>
-                syncStore.insertChildAddresses({
-                  factory,
-                  childAddresses,
-                  chainId: params.chain.id,
-                }),
-            ),
+            syncStore.insertChildAddresses({
+              childAddresses,
+              chainId: params.chain.id,
+            }),
           ]);
 
           const intervals: {
@@ -1091,16 +1102,18 @@ export async function handleRealtimeSyncEvent(
         } else break;
       }
 
-      await createSyncStore({
-        common: params.common,
-        qb: params.database.syncQB,
-      }).pruneRpcRequestResults(
-        {
-          chainId: params.chain.id,
-          blocks: event.reorgedBlocks,
-        },
-        { logger: params.common.logger.child({ action: "reconcile_reorg" }) },
-      );
+      if (params.chain.cacheRpcRequests) {
+        await createSyncStore({
+          common: params.common,
+          qb: params.database.syncQB,
+        }).pruneRpcRequestResults(
+          {
+            chainId: params.chain.id,
+            blocks: event.reorgedBlocks,
+          },
+          { logger: params.common.logger.child({ action: "reconcile_reorg" }) },
+        );
+      }
 
       break;
     }

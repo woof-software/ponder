@@ -166,7 +166,16 @@ export const buildEvents = ({
       transactionReceiptsIndex++;
     }
 
-    const transactionReceipt = transactionReceipts[transactionReceiptsIndex]!;
+    let transactionReceipt: InternalTransactionReceipt | undefined;
+    if (
+      transactionReceiptsIndex < transactionReceipts.length &&
+      transactionReceipts[transactionReceiptsIndex]!.blockNumber ===
+        blockNumber &&
+      transactionReceipts[transactionReceiptsIndex]!.transactionIndex ===
+        transactionIndex
+    ) {
+      transactionReceipt = transactionReceipts[transactionReceiptsIndex]!;
+    }
 
     for (const transactionEventCallbackIndex of transactionEventCallbackIndexes) {
       const filter = eventCallbacks[transactionEventCallbackIndex]!
@@ -186,16 +195,17 @@ export const buildEvents = ({
               blockNumber,
               childAddresses: childAddresses.get(filter.toAddress.id)!,
             })
-          : true) &&
-        (filter.includeReverted
-          ? true
-          : transactionReceipt.status === "success")
+          : true)
       ) {
         if (filter.hasTransactionReceipt && transactionReceipt === undefined) {
           throw new Error(
             `Failed to build events from block data. Missing transaction receipt for block ${blockNumber} and transaction index ${transactionIndex} for chain ID ${chainId}`,
           );
         }
+
+        // Note: Unlike reverted traces, reverted transactions are stored in the
+        // sync store because the receipt is required to detect the revert.
+        if (transactionReceipt!.status !== "success") continue;
 
         events.push({
           chainId: filter.chainId,
@@ -221,10 +231,23 @@ export const buildEvents = ({
   blocksIndex = 0;
   transactionReceiptsIndex = 0;
 
+  let traceIndex = 0;
+  let traceBlockNumber: number | undefined;
+  let traceTransactionIndex: number | undefined;
   for (const trace of traces) {
     const blockNumber = trace.blockNumber;
     const transactionIndex = trace.transactionIndex;
-    const traceIndex = trace.traceIndex;
+
+    if (
+      blockNumber !== traceBlockNumber ||
+      transactionIndex !== traceTransactionIndex
+    ) {
+      traceIndex = 0;
+      traceBlockNumber = blockNumber;
+      traceTransactionIndex = transactionIndex;
+    }
+
+    const eventCount = events.length;
 
     while (
       blocksIndex < blocks.length &&
@@ -307,11 +330,7 @@ export const buildEvents = ({
               blockNumber,
               childAddresses: childAddresses.get(filter.toAddress.id)!,
             })
-          : true) &&
-        (filter.callType === undefined
-          ? true
-          : filter.callType === trace.type) &&
-        (filter.includeReverted ? true : trace.error === undefined)
+          : true)
       ) {
         if (filter.hasTransactionReceipt && transactionReceipt === undefined) {
           throw new Error(
@@ -360,8 +379,7 @@ export const buildEvents = ({
               blockNumber,
               childAddresses: childAddresses.get(filter.toAddress.id)!,
             })
-          : true) &&
-        (filter.includeReverted ? true : trace.error === undefined)
+          : true)
       ) {
         if (filter.hasTransactionReceipt && transactionReceipt === undefined) {
           throw new Error(
@@ -378,7 +396,7 @@ export const buildEvents = ({
             blockNumber,
             transactionIndex,
             eventType: EVENT_TYPES.traces,
-            eventIndex: trace.traceIndex,
+            eventIndex: traceIndex,
           }),
           log: undefined,
           trace,
@@ -390,6 +408,9 @@ export const buildEvents = ({
         });
       }
     }
+
+    // Note: Increment `traceIndex` only if the trace matched at least one filter
+    if (events.length > eventCount) traceIndex++;
   }
 
   blocksIndex = 0;
@@ -600,7 +621,8 @@ export const decodeEvents = (
       eventCallback.filter.type === "trace"
     ) {
       let decodedData: { args: readonly unknown[]; functionName: string };
-      let decodedResult: readonly unknown[];
+      // A function with one output decodes to that value, not an array.
+      let decodedResult: unknown;
       try {
         decodedData = decodeFunctionData({
           abi: [eventCallback.abiItem as AbiFunction],
@@ -627,7 +649,10 @@ export const decodeEvents = (
             function: eventCallback.name,
             block_number: event?.block?.number ?? "unknown",
             transaction_index: event.transaction?.transactionIndex,
-            trace_index: event.trace?.traceIndex,
+            trace_address:
+              event.trace === undefined
+                ? undefined
+                : JSON.stringify(event.trace.traceAddress),
             input: event.trace?.input,
             output: event.trace?.output,
           });
@@ -783,16 +808,23 @@ export const syncTransactionToInternal = ({
     ? {
         type: "legacy",
         gasPrice: hexToBigInt(transaction.gasPrice),
+        accessList: undefined,
+        maxFeePerGas: undefined,
+        maxPriorityFeePerGas: undefined,
       }
     : transaction.type === "0x1"
       ? {
           type: "eip2930",
           gasPrice: hexToBigInt(transaction.gasPrice),
           accessList: transaction.accessList,
+          maxFeePerGas: undefined,
+          maxPriorityFeePerGas: undefined,
         }
       : transaction.type === "0x2"
         ? {
             type: "eip1559",
+            gasPrice: undefined,
+            accessList: undefined,
             maxFeePerGas: hexToBigInt(transaction.maxFeePerGas),
             maxPriorityFeePerGas: hexToBigInt(transaction.maxPriorityFeePerGas),
           }
@@ -800,6 +832,8 @@ export const syncTransactionToInternal = ({
           transaction.type === "0x7e"
           ? {
               type: "deposit",
+              gasPrice: undefined,
+              accessList: undefined,
               // @ts-expect-error
               maxFeePerGas: transaction.maxFeePerGas
                 ? // @ts-ignore
@@ -813,6 +847,17 @@ export const syncTransactionToInternal = ({
             }
           : {
               type: transaction.type,
+              gasPrice: transaction.gasPrice
+                ? // @ts-ignore
+                  hexToBigInt(transaction.gasPrice)
+                : undefined,
+              accessList: transaction.accessList,
+              maxFeePerGas: transaction.maxFeePerGas
+                ? hexToBigInt(transaction.maxFeePerGas)
+                : undefined,
+              maxPriorityFeePerGas: transaction.maxPriorityFeePerGas
+                ? hexToBigInt(transaction.maxPriorityFeePerGas)
+                : undefined,
             }),
 });
 
@@ -860,7 +905,7 @@ export const syncTraceToInternal = ({
   transaction: Pick<SyncTransaction, "transactionIndex">;
 }): InternalTrace => ({
   blockNumber: hexToNumber(block.number),
-  traceIndex: trace.trace.index,
+  traceAddress: trace.trace.traceAddress,
   transactionIndex: hexToNumber(transaction.transactionIndex),
   type: trace.trace.type,
   from: toLowerCase(trace.trace.from),
@@ -869,8 +914,5 @@ export const syncTraceToInternal = ({
   gasUsed: hexToBigInt(trace.trace.gasUsed),
   input: trace.trace.input,
   output: trace.trace.output,
-  error: trace.trace.error,
-  revertReason: trace.trace.revertReason,
   value: trace.trace.value ? hexToBigInt(trace.trace.value) : null,
-  subcalls: trace.trace.subcalls,
 });

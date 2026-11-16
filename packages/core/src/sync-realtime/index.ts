@@ -1,6 +1,8 @@
 import {
   type Address,
   type Hash,
+  type Hex,
+  hexToBytes,
   hexToNumber,
   numberToHex,
   zeroHash,
@@ -12,6 +14,7 @@ import type {
   Chain,
   EventCallback,
   Factory,
+  FactoryFragmentId,
   FactoryId,
   Filter,
   LightBlock,
@@ -30,9 +33,8 @@ import {
   debug_traceBlockByHash,
   eth_getBlockByHash,
   eth_getBlockByNumber,
-  eth_getBlockReceipts,
   eth_getLogs,
-  eth_getTransactionReceipt,
+  eth_getTransactionReceipts,
   validateLogsAndBlock,
   validateReceiptsAndBlock,
   validateTracesAndBlock,
@@ -45,18 +47,31 @@ import {
   isAddressFactory,
   isAddressMatched,
   isBlockFilterMatched,
+  isBlockInFilter,
   isLogFactoryMatched,
   isLogFilterMatched,
   isTraceFilterMatched,
   isTransactionFilterMatched,
   isTransferFilterMatched,
+  mergeLogFiltersToBlockRequest,
 } from "@/runtime/filter.js";
+import {
+  getFactoryFragmentId,
+  getFactoryFragmentIds,
+} from "@/runtime/fragments.js";
 import type { SyncProgress } from "@/runtime/index.js";
 import { isAsyncExecutionChain } from "@/utils/finality.js";
 import { createLock } from "@/utils/mutex.js";
 import { range } from "@/utils/range.js";
 import { startClock } from "@/utils/timer.js";
-import { isFilterInBloom, isInBloom, zeroLogsBloom } from "./bloom.js";
+import {
+  getFactoryBloom,
+  getLogFilterBloom,
+  isFactoryInBloom,
+  isFilterInBloom,
+  isInBloom,
+  zeroLogsBloom,
+} from "./bloom.js";
 
 export type RealtimeSync = {
   /**
@@ -79,7 +94,8 @@ export type BlockWithEventData = {
   transactionReceipts: SyncTransactionReceipt[];
   logs: SyncLog[];
   traces: SyncTrace[];
-  childAddresses: Map<Factory, Set<Address>>;
+  /** Child addresses found in the block per `factory_log` fragment ID. */
+  childAddresses: Map<FactoryFragmentId, Set<Address>>;
 };
 
 export type RealtimeSyncEvent =
@@ -106,7 +122,6 @@ const MAX_QUEUED_BLOCKS = 50;
 export const createRealtimeSync = (
   args: CreateRealtimeSyncParameters,
 ): RealtimeSync => {
-  let isBlockReceipts = true;
   let finalizedBlock: LightBlock = args.syncProgress.finalized;
   const childAddresses = args.childAddresses;
   /** Annotates `childAddresses` for efficient lookup by block number */
@@ -129,6 +144,7 @@ export const createRealtimeSync = (
 
   const factories: Factory[] = [];
   const factoryIds = new Set<FactoryId>();
+  const factoryFragmentIds = new Map<Factory, FactoryFragmentId[]>();
   const logFilters: LogFilter[] = [];
   const traceFilters: TraceFilter[] = [];
   const transactionFilters: TransactionFilter[] = [];
@@ -167,103 +183,12 @@ export const createRealtimeSync = (
       if (factoryIds.has(factory.id)) continue;
       factoryIds.add(factory.id);
       factories.push(factory);
+      factoryFragmentIds.set(factory, getFactoryFragmentIds(factory));
     }
   }
 
-  const syncTransactionReceipts = async (
-    block: SyncBlock,
-    transactionHashes: Set<Hash>,
-    ethGetBlockMethod: "eth_getBlockByHash" | "eth_getBlockByNumber",
-    context?: Parameters<Rpc["request"]>[1],
-  ): Promise<SyncTransactionReceipt[]> => {
-    if (transactionHashes.size === 0) {
-      return [];
-    }
-
-    if (isBlockReceipts === false) {
-      const transactionReceipts = await Promise.all(
-        Array.from(transactionHashes).map(async (hash) => {
-          const receipt = await eth_getTransactionReceipt(
-            args.rpc,
-            [hash],
-            context,
-          );
-
-          validateReceiptsAndBlock(
-            [receipt],
-            block,
-            {
-              method: "eth_getTransactionReceipt",
-              params: [hash],
-            },
-            ethGetBlockMethod === "eth_getBlockByNumber"
-              ? {
-                  method: "eth_getBlockByNumber",
-                  params: [block.number, true],
-                }
-              : {
-                  method: "eth_getBlockByHash",
-                  params: [block.hash, true],
-                },
-          );
-
-          return receipt;
-        }),
-      );
-
-      return transactionReceipts;
-    }
-
-    let blockReceipts: SyncTransactionReceipt[];
-    try {
-      blockReceipts = await eth_getBlockReceipts(
-        args.rpc,
-        [block.hash],
-        context,
-      );
-    } catch (_error) {
-      const error = _error as Error;
-      args.common.logger.warn({
-        msg: "Caught eth_getBlockReceipts error, switching to eth_getTransactionReceipt method",
-        action: "fetch block data",
-        chain: args.chain.name,
-        chain_id: args.chain.id,
-        error,
-      });
-
-      isBlockReceipts = false;
-      return syncTransactionReceipts(
-        block,
-        transactionHashes,
-        ethGetBlockMethod,
-        context,
-      );
-    }
-
-    validateReceiptsAndBlock(
-      blockReceipts,
-      block,
-      {
-        method: "eth_getBlockReceipts",
-        params: [block.hash],
-      },
-      ethGetBlockMethod === "eth_getBlockByNumber"
-        ? {
-            method: "eth_getBlockByNumber",
-            params: [block.number, true],
-          }
-        : {
-            method: "eth_getBlockByHash",
-            params: [block.hash, true],
-          },
-    );
-
-    const transactionReceipts = blockReceipts.filter((receipt) =>
-      transactionHashes.has(receipt.transactionHash),
-    );
-
-    return transactionReceipts;
-  };
+  const logFilterBlooms = logFilters.map(getLogFilterBloom);
+  const factoryBlooms = factories.map(getFactoryBloom);
 
   const getLatestUnfinalizedBlock = () => {
     if (unfinalizedBlocks.length === 0) {
@@ -300,33 +225,45 @@ export const createRealtimeSync = (
     // Logs
     ////////
 
-    // "eth_getLogs" calls can be skipped if no filters match `newHeadBlock.logsBloom`.
     // Async-execution chains cannot reliably use blooms to filter or validate logs.
+    // A zero `logsBloom` is treated as missing.
     const isAsyncExecution = isAsyncExecutionChain(args.chain.id);
-    const shouldRequestLogs = isAsyncExecution
-      ? logFilters.length > 0
-      : maybeBlockHeader.logsBloom === zeroLogsBloom ||
-        logFilters.some((filter) =>
-          isFilterInBloom({ block: maybeBlockHeader, filter }),
-        );
+    const blockNumber = hexToNumber(maybeBlockHeader.number);
+    const bloom = hexToBytes(maybeBlockHeader.logsBloom);
+
+    const logsRequestFilter = mergeLogFiltersToBlockRequest({
+      logFilters: logFilters.filter(
+        (logFilter, i) =>
+          isBlockInFilter(logFilter, blockNumber) &&
+          (isAsyncExecution ||
+            maybeBlockHeader.logsBloom === zeroLogsBloom ||
+            isFilterInBloom({ bloom, filter: logFilterBlooms[i]! })),
+      ),
+      factories: factories.filter(
+        (factory, i) =>
+          isBlockInFilter(factory, blockNumber) &&
+          (isAsyncExecution ||
+            maybeBlockHeader.logsBloom === zeroLogsBloom ||
+            isFactoryInBloom({ bloom, factory: factoryBlooms[i]! })),
+      ),
+    });
+    const shouldRequestLogs = logsRequestFilter !== undefined;
 
     let logs: SyncLog[] = [];
     if (shouldRequestLogs) {
+      const logsRequestParams = {
+        blockHash: maybeBlockHeader.hash,
+        address: logsRequestFilter.address,
+        topics: logsRequestFilter.topics,
+      };
+
       if (block === undefined) {
         [block, logs] = await Promise.all([
           eth_getBlockByHash(args.rpc, [maybeBlockHeader.hash, true], context),
-          eth_getLogs(
-            args.rpc,
-            [{ blockHash: maybeBlockHeader.hash }],
-            context,
-          ),
+          eth_getLogs(args.rpc, [logsRequestParams], context),
         ]);
       } else {
-        logs = await eth_getLogs(
-          args.rpc,
-          [{ blockHash: block.hash }],
-          context,
-        );
+        logs = await eth_getLogs(args.rpc, [logsRequestParams], context);
       }
 
       validateLogsAndBlock(
@@ -334,7 +271,7 @@ export const createRealtimeSync = (
         block,
         {
           method: "eth_getLogs",
-          params: [{ blockHash: block.hash }],
+          params: [logsRequestParams],
         },
         ethGetBlockMethod === "eth_getBlockByNumber"
           ? {
@@ -345,59 +282,7 @@ export const createRealtimeSync = (
               method: "eth_getBlockByHash",
               params: [block.hash, true],
             },
-        isAsyncExecutionChain(args.chain.id),
       );
-
-      if (isAsyncExecutionChain(args.chain.id) === false) {
-        // Note: Exact `logsBloom` validations were considered too strict to add to `validateLogsAndBlock`.
-        let isInvalidLogsBloom = false;
-        for (const log of logs) {
-          if (isInBloom(block.logsBloom, log.address) === false) {
-            isInvalidLogsBloom = true;
-          }
-
-          if (
-            log.topics[0] &&
-            isInBloom(block.logsBloom, log.topics[0]) === false
-          ) {
-            isInvalidLogsBloom = true;
-          }
-
-          if (
-            log.topics[1] &&
-            isInBloom(block.logsBloom, log.topics[1]) === false
-          ) {
-            isInvalidLogsBloom = true;
-          }
-
-          if (
-            log.topics[2] &&
-            isInBloom(block.logsBloom, log.topics[2]) === false
-          ) {
-            isInvalidLogsBloom = true;
-          }
-
-          if (
-            log.topics[3] &&
-            isInBloom(block.logsBloom, log.topics[3]) === false
-          ) {
-            isInvalidLogsBloom = true;
-          }
-
-          if (isInvalidLogsBloom) {
-            args.common.logger.warn({
-              msg: "Detected inconsistent RPC responses. Log not found in block.logsBloom.",
-              action: "fetch_block_data",
-              chain: args.chain.name,
-              chain_id: args.chain.id,
-              number: hexToNumber(block.number),
-              hash: block.hash,
-              logIndex: hexToNumber(log.logIndex),
-            });
-            break;
-          }
-        }
-      }
 
       for (const log of logs) {
         if (log.transactionHash === zeroHash) {
@@ -414,7 +299,10 @@ export const createRealtimeSync = (
       }
     }
 
-    if (shouldRequestLogs === false && logFilters.length > 0) {
+    if (
+      shouldRequestLogs === false &&
+      (logFilters.length > 0 || factories.length > 0)
+    ) {
       args.common.logger.trace({
         msg: "Skipped eth_getLogs request due to bloom filter result",
         action: "fetch_block_data",
@@ -475,16 +363,17 @@ export const createRealtimeSync = (
     ////////
 
     // Record `blockChildAddresses` that contain factory child addresses
-    const blockChildAddresses = new Map<Factory, Set<Address>>();
+    const blockChildAddresses: BlockWithEventData["childAddresses"] = new Map();
+    const factoryLogs = new Set<SyncLog>();
 
     const childAddressDecodeFailureIds = new Set<string>();
     let childAddressDecodeFailureCount = 0;
     let childAddressDecodeSuccessCount = 0;
 
     for (const factory of factories) {
-      blockChildAddresses.set(factory, new Set<Address>());
       for (const log of logs) {
         if (isLogFactoryMatched({ factory, log })) {
+          factoryLogs.add(log);
           let address: Address;
           try {
             address = getChildAddress({ log, factory });
@@ -510,7 +399,11 @@ export const createRealtimeSync = (
               throw error;
             }
           }
-          blockChildAddresses.get(factory)!.add(address);
+          const fragmentId = getFactoryFragmentId(factory, log.address);
+          if (blockChildAddresses.has(fragmentId) === false) {
+            blockChildAddresses.set(fragmentId, new Set());
+          }
+          blockChildAddresses.get(fragmentId)!.add(address);
         }
       }
     }
@@ -547,6 +440,69 @@ export const createRealtimeSync = (
 
       return isMatched;
     });
+
+    if (isAsyncExecution === false && block !== undefined) {
+      // Note: Exact `logsBloom` validations were considered too strict to add to `validateLogsAndBlock`.
+      const logsBloom = hexToBytes(block.logsBloom);
+      const checkedInputs = new Set<Hex>();
+      let isInvalidLogsBloom = false;
+      for (const log of [...factoryLogs, ...logs]) {
+        if (
+          checkedInputs.has(log.address) === false &&
+          isInBloom(logsBloom, log.address) === false
+        ) {
+          isInvalidLogsBloom = true;
+        }
+
+        if (
+          log.topics[0] &&
+          checkedInputs.has(log.topics[0]) === false &&
+          isInBloom(logsBloom, log.topics[0]) === false
+        ) {
+          isInvalidLogsBloom = true;
+        }
+
+        if (
+          log.topics[1] &&
+          checkedInputs.has(log.topics[1]) === false &&
+          isInBloom(logsBloom, log.topics[1]) === false
+        ) {
+          isInvalidLogsBloom = true;
+        }
+
+        if (
+          log.topics[2] &&
+          checkedInputs.has(log.topics[2]) === false &&
+          isInBloom(logsBloom, log.topics[2]) === false
+        ) {
+          isInvalidLogsBloom = true;
+        }
+
+        if (
+          log.topics[3] &&
+          checkedInputs.has(log.topics[3]) === false &&
+          isInBloom(logsBloom, log.topics[3]) === false
+        ) {
+          isInvalidLogsBloom = true;
+        }
+
+        if (isInvalidLogsBloom) {
+          args.common.logger.warn({
+            msg: "Detected inconsistent RPC responses. Log not found in block.logsBloom.",
+            action: "fetch_block_data",
+            chain: args.chain.name,
+            chain_id: args.chain.id,
+            number: hexToNumber(block.number),
+            hash: block.hash,
+            logIndex: hexToNumber(log.logIndex),
+          });
+          break;
+        }
+
+        checkedInputs.add(log.address);
+        for (const topic of log.topics) checkedInputs.add(topic);
+      }
+    }
 
     // Initial weak trace filtering before full filtering with factory addresses in handleBlock
     traces = traces.filter((trace) => {
@@ -659,11 +615,25 @@ export const createRealtimeSync = (
     // Transaction Receipts
     ////////
 
-    const transactionReceipts = await syncTransactionReceipts(
-      block,
-      requiredTransactionReceipts,
-      ethGetBlockMethod,
+    const receiptResponses = await eth_getTransactionReceipts(
+      args.rpc,
+      { blockHash: block.hash, transactionHashes: requiredTransactionReceipts },
       context,
+    );
+    const transactionReceipts = receiptResponses.flatMap(
+      ({ receipts, request }) => {
+        validateReceiptsAndBlock(
+          receipts,
+          block,
+          request,
+          ethGetBlockMethod === "eth_getBlockByNumber"
+            ? { method: "eth_getBlockByNumber", params: [block.number, true] }
+            : { method: "eth_getBlockByHash", params: [block.hash, true] },
+        );
+        return receipts.filter((receipt) =>
+          requiredTransactionReceipts.has(receipt.transactionHash),
+        );
+      },
     );
 
     let childAddressCount = 0;
@@ -712,15 +682,17 @@ export const createRealtimeSync = (
     matchedFilters: Set<Filter>;
   } => {
     // Update `childAddresses`
-    for (const factory of factories) {
-      const knownAddresses = childAddresses.get(factory.id)!;
-      const blockAddresses = blockChildAddresses.get(factory)!;
-      for (const address of blockAddresses) {
-        // Retain only addresses first discovered in this block in the persistence and reorg delta.
-        if (knownAddresses.has(address)) {
-          blockAddresses.delete(address);
-        } else {
-          knownAddresses.set(address, hexToNumber(block.number));
+    if (blockChildAddresses.size > 0) {
+      for (const factory of factories) {
+        const knownAddresses = childAddresses.get(factory.id)!;
+        for (const fragmentId of factoryFragmentIds.get(factory)!) {
+          const blockAddresses = blockChildAddresses.get(fragmentId);
+          if (blockAddresses === undefined) continue;
+          for (const address of blockAddresses) {
+            if (knownAddresses.has(address) === false) {
+              knownAddresses.set(address, hexToNumber(block.number));
+            }
+          }
         }
       }
     }
@@ -964,15 +936,21 @@ export const createRealtimeSync = (
 
     // remove reorged blocks from `childAddresses`
     for (const block of reorgedBlocks) {
+      const blockNumber = hexToNumber(block.number);
+      const blockChildAddresses = childAddressesPerBlock.get(blockNumber)!;
       for (const factory of factories) {
-        const addresses = childAddressesPerBlock
-          .get(hexToNumber(block.number))!
-          .get(factory)!;
-        for (const address of addresses) {
-          childAddresses.get(factory.id)!.delete(address);
+        const knownAddresses = childAddresses.get(factory.id)!;
+        for (const fragmentId of factoryFragmentIds.get(factory)!) {
+          const blockAddresses = blockChildAddresses.get(fragmentId);
+          if (blockAddresses === undefined) continue;
+          for (const address of blockAddresses) {
+            if (knownAddresses.get(address) === blockNumber) {
+              knownAddresses.delete(address);
+            }
+          }
         }
       }
-      childAddressesPerBlock.delete(hexToNumber(block.number));
+      childAddressesPerBlock.delete(blockNumber);
     }
 
     return {
@@ -1156,20 +1134,24 @@ export const createRealtimeSync = (
       blockCallback,
     };
 
-    // Determine if a new range has become finalized by evaluating if the
-    // latest block number is 2 * finalityBlockCount >= finalized block number.
-    // Essentially, there is a range the width of finalityBlockCount that is entirely
-    // finalized.
-
+    // Finalize the oldest contiguous blocks that are outside the timestamp
+    // based reorg window.
     const blockMovesFinality =
-      hexToNumber(block.number) >=
-      hexToNumber(finalizedBlock.number) + 2 * args.chain.finalityBlockCount;
+      hexToNumber(block.timestamp) -
+        hexToNumber(unfinalizedBlocks[0]!.timestamp) >=
+      args.chain.reorgWindow;
     if (blockMovesFinality) {
-      const pendingFinalizedBlock = unfinalizedBlocks.find(
-        (lb) =>
-          hexToNumber(lb.number) ===
-          hexToNumber(block.number) - args.chain.finalityBlockCount,
-      )!;
+      let pendingFinalizedBlock = unfinalizedBlocks[0]!;
+      for (const candidate of unfinalizedBlocks) {
+        if (
+          hexToNumber(block.timestamp) - hexToNumber(candidate.timestamp) >=
+          args.chain.reorgWindow
+        ) {
+          pendingFinalizedBlock = candidate;
+        } else {
+          break;
+        }
+      }
 
       args.common.logger.debug({
         msg: "Removed finalized blocks from local chain",

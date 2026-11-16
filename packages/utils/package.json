@@ -1,6 +1,6 @@
 {
   "name": "@ponder/utils",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "",
   "license": "MIT",
   "type": "module",
@@ -52,6 +52,6 @@
     "abitype": "^1.0.1",
     "dotenv": "^16.3.1",
     "tsup": "^8.0.1",
-    "vitest": "1.6.1"
+    "vitest": "5.0.2"
   }
 }

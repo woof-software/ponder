@@ -1,5 +1,35 @@
 # @ponder/client
 
+## 0.18.8
+
+No changes in this release.
+
+## 0.18.7
+
+No changes in this release.
+
+## 0.18.6
+
+No changes in this release.
+
+## 0.18.5
+
+No changes in this release.
+
+## 0.18.4
+
+No changes in this release.
+
+## 0.18.3
+
+No changes in this release.
+
+## 0.18.2
+
+## 0.18.1
+
+## 0.18.0
+
 ## 0.17.12
 
 ## 0.17.11

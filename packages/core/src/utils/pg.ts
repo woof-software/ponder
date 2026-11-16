@@ -75,7 +75,8 @@ export function createPool(
       callback: (err: Error) => void | undefined,
     ): void | Promise<void> {
       if (callback) {
-        super.connect(() => {
+        super.connect((error) => {
+          if (error) return callback(error);
           this.query(connectionSetupSql, callback);
         });
       } else {
@@ -152,7 +153,8 @@ export function createReadonlyPool(
       callback: (err: Error) => void | undefined,
     ): void | Promise<void> {
       if (callback) {
-        super.connect(() => {
+        super.connect((error) => {
+          if (error) return callback(error);
           this.query(
             `
           SET search_path = "${namespace}";
