@@ -430,7 +430,7 @@ export const createRpc = ({
     }
 
     for (const { count } of bucket.rps) {
-      if (count < bucket.rpsLimit * RPS_INCREASE_QUALIFIER) {
+      if (count < Math.floor(bucket.rpsLimit) * RPS_INCREASE_QUALIFIER) {
         return;
       }
     }
