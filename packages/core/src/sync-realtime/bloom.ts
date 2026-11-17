@@ -1,102 +1,152 @@
-import { type Hex, hexToBytes, hexToNumber, keccak256 } from "viem";
-import type { LogFilter, SyncBlock } from "@/internal/types.js";
-import {
-  getFilterFromBlock,
-  getFilterToBlock,
-  isAddressFactory,
-} from "@/runtime/filter.js";
+import { type Hex, keccak256 } from "viem";
+import type { Factory, LogFilter } from "@/internal/types.js";
+import { isAddressFactory } from "@/runtime/filter.js";
 
 export const zeroLogsBloom =
   "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
 const BLOOM_SIZE_BYTES = 256;
 
-export const isInBloom = (_bloom: Hex, input: Hex): boolean => {
-  const bloom = hexToBytes(_bloom);
-  const hash = hexToBytes(keccak256(input));
+export type BloomBits = {
+  byte0: number;
+  mask0: number;
+  byte1: number;
+  mask1: number;
+  byte2: number;
+  mask2: number;
+};
 
-  for (const i of [0, 2, 4]) {
-    const bit = (hash[i + 1]! + (hash[i]! << 8)) & 0x7ff;
-    if (
-      (bloom[BLOOM_SIZE_BYTES - 1 - Math.floor(bit / 8)]! &
-        (1 << (bit % 8))) ===
-      0
-    )
-      return false;
+/**
+ * A `LogFilter` with each address and topic converted to `BloomBits`.
+ *
+ * `undefined` matches every bloom. An array matches if any item is in the bloom.
+ */
+export type LogFilterBloom = {
+  address: BloomBits[] | undefined;
+  topics: (BloomBits[] | undefined)[];
+};
+
+export const getBloomBits = (input: Hex): BloomBits => {
+  const hash = keccak256(input, "bytes");
+  const bytes = [0, 0, 0];
+  const masks = [0, 0, 0];
+
+  for (let i = 0; i < 3; i++) {
+    const bit = (hash[i * 2 + 1]! + (hash[i * 2]! << 8)) & 0x7ff;
+    bytes[i] = BLOOM_SIZE_BYTES - 1 - Math.floor(bit / 8);
+    masks[i] = 1 << (bit % 8);
   }
 
-  return true;
+  return {
+    byte0: bytes[0]!,
+    mask0: masks[0]!,
+    byte1: bytes[1]!,
+    mask1: masks[1]!,
+    byte2: bytes[2]!,
+    mask2: masks[2]!,
+  };
+};
+
+export const isBloomBitsInBloom = (
+  bloom: Uint8Array,
+  bits: BloomBits,
+): boolean =>
+  (bloom[bits.byte0]! & bits.mask0) !== 0 &&
+  (bloom[bits.byte1]! & bits.mask1) !== 0 &&
+  (bloom[bits.byte2]! & bits.mask2) !== 0;
+
+export const isInBloom = (bloom: Uint8Array, input: Hex): boolean =>
+  isBloomBitsInBloom(bloom, getBloomBits(input));
+
+const isAnyInBloom = (
+  bloom: Uint8Array,
+  bits: BloomBits[] | undefined,
+): boolean =>
+  bits === undefined || bits.some((b) => isBloomBitsInBloom(bloom, b));
+
+const toBloomBits = (
+  input: Hex | Hex[] | null | undefined,
+): BloomBits[] | undefined => {
+  if (input === null || input === undefined) return undefined;
+  if (Array.isArray(input)) return input.map(getBloomBits);
+  return [getBloomBits(input)];
+};
+
+/**
+ * Convert `filter` to a `LogFilterBloom`. Call once for each filter,
+ * so that the inputs are not hashed again for each block.
+ */
+export const getLogFilterBloom = (filter: LogFilter): LogFilterBloom => {
+  let address: BloomBits[] | undefined;
+
+  if (isAddressFactory(filter.address)) {
+    address = undefined;
+  } else if (Array.isArray(filter.address) && filter.address.length === 0) {
+    address = undefined;
+  } else {
+    address = toBloomBits(filter.address);
+  }
+
+  return {
+    address,
+    topics: [filter.topic0, filter.topic1, filter.topic2, filter.topic3].map(
+      toBloomBits,
+    ),
+  };
 };
 
 /**
  * Return true if `filter` is in `bloom`.
  *
- * A filter with an address of type `LogFactory` is matched
- * if the address filter is matched (new child contract) or the log
- * filter is matched (log on child contract).
+ * A filter with an address of type `LogFactory` matches all addresses.
+ * Use `isFactoryInBloom` to check for new child contracts.
  *
  * Note: False positives are possible.
  */
 export function isFilterInBloom({
-  block,
+  bloom,
   filter,
 }: {
-  block: Pick<SyncBlock, "number" | "logsBloom">;
-  filter: LogFilter;
+  bloom: Uint8Array;
+  filter: LogFilterBloom;
 }): boolean {
-  // Return `false` for out of range blocks
-  if (
-    hexToNumber(block.number) < getFilterFromBlock(filter) ||
-    hexToNumber(block.number) > getFilterToBlock(filter)
-  ) {
-    return false;
-  }
+  return (
+    isAnyInBloom(bloom, filter.address) &&
+    filter.topics.every((topic) => isAnyInBloom(bloom, topic))
+  );
+}
 
-  const isTopicsInBloom = [
-    filter.topic0,
-    filter.topic1,
-    filter.topic2,
-    filter.topic3,
-  ].every((topic) => {
-    if (topic === null || topic === undefined) {
-      return true;
-    } else if (Array.isArray(topic)) {
-      return topic.some((t) => isInBloom(block.logsBloom, t));
-    } else {
-      return isInBloom(block.logsBloom, topic);
-    }
-  });
+/**
+ * A `Factory` with its address and event selector converted to `BloomBits`.
+ */
+export type FactoryBloom = {
+  address: BloomBits[] | undefined;
+  eventSelector: BloomBits;
+};
 
-  let isAddressInBloom: boolean;
+/**
+ * Convert `factory` to a `FactoryBloom`. Call once for each factory,
+ * so that the inputs are not hashed again for each block.
+ */
+export const getFactoryBloom = (factory: Factory): FactoryBloom => ({
+  address: toBloomBits(factory.address),
+  eventSelector: getBloomBits(factory.eventSelector),
+});
 
-  if (filter.address === undefined) isAddressInBloom = true;
-  else if (isAddressFactory(filter.address)) {
-    // Return true if the `Factory` is matched.
-    if (
-      (filter.address.address === undefined ||
-        (Array.isArray(filter.address.address)
-          ? filter.address.address.some((address) =>
-              isInBloom(block.logsBloom, address),
-            )
-          : isInBloom(block.logsBloom, filter.address.address))) &&
-      isInBloom(block.logsBloom, filter.address.eventSelector)
-    ) {
-      return true;
-    }
-
-    isAddressInBloom = true;
-  } else if (Array.isArray(filter.address)) {
-    if (filter.address.length === 0) {
-      isAddressInBloom = true;
-    } else {
-      isAddressInBloom = filter.address.some((address) =>
-        isInBloom(block.logsBloom, address),
-      );
-    }
-  } else {
-    // single address case
-    isAddressInBloom = isInBloom(block.logsBloom, filter.address);
-  }
-
-  return isAddressInBloom && isTopicsInBloom;
+/**
+ * Return true if a log that matches `factory` can be in `bloom`.
+ *
+ * Note: False positives are possible.
+ */
+export function isFactoryInBloom({
+  bloom,
+  factory,
+}: {
+  bloom: Uint8Array;
+  factory: FactoryBloom;
+}): boolean {
+  return (
+    isAnyInBloom(bloom, factory.address) &&
+    isBloomBitsInBloom(bloom, factory.eventSelector)
+  );
 }

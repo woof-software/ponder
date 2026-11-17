@@ -1,5 +1,39 @@
 # create-ponder
 
+## 0.18.8
+
+No changes in this release.
+
+## 0.18.7
+
+### Patch Changes
+
+- [#2478](https://github.com/ponder-sh/ponder/pull/2478) [`25d4a1d`](https://github.com/ponder-sh/ponder/commit/25d4a1d76a93c9420a9671648fb4317d1d9f050e) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed Node version validation (`>=22.12` is required).
+
+## 0.18.6
+
+No changes in this release.
+
+## 0.18.5
+
+No changes in this release.
+
+## 0.18.4
+
+No changes in this release.
+
+## 0.18.3
+
+### Patch Changes
+
+- [#2438](https://github.com/ponder-sh/ponder/pull/2438) [`bf8acf2`](https://github.com/ponder-sh/ponder/commit/bf8acf271a450c9308c8d07287ee43cd82c4fd1d) Thanks [@kyscott18](https://github.com/kyscott18)! - Removed ESLint and `eslint-config-ponder` from projects created by `create-ponder`. The `eslint-config-ponder` package is no longer maintained.
+
+## 0.18.2
+
+## 0.18.1
+
+## 0.18.0
+
 ## 0.17.12
 
 ## 0.17.11

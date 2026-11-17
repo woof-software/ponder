@@ -1,5 +1,68 @@
 # @ponder/react
 
+## 0.18.8
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @ponder/client@0.18.8
+
+## 0.18.7
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @ponder/client@0.18.7
+
+## 0.18.6
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @ponder/client@0.18.6
+
+## 0.18.5
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @ponder/client@0.18.5
+
+## 0.18.4
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @ponder/client@0.18.4
+
+## 0.18.3
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @ponder/client@0.18.3
+
+## 0.18.2
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @ponder/client@0.18.2
+
+## 0.18.1
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @ponder/client@0.18.1
+
+## 0.18.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @ponder/client@0.18.0
+
 ## 0.17.12
 
 ### Patch Changes

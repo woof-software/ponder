@@ -1,8 +1,8 @@
-import { beforeEach, expect, test, vi } from "vitest";
+import { custom, HttpRequestError } from "viem";
+import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { context, setupAnvil, setupCommon } from "@/_test/setup.js";
 import { simulateBlock } from "@/_test/simulate.js";
 import { getChain } from "@/_test/utils.js";
-import { wait } from "@/utils/wait.js";
 import { createRpc, sanitizeLogTopics } from "./index.js";
 
 beforeEach(setupCommon);
@@ -36,6 +36,70 @@ test("createRpc() handles rate limiting", async () => {
   await rpc.request({ method: "eth_blockNumber" });
 });
 
+test("createRpc() raises the rps limit after rate limits", async () => {
+  const nextTick = setImmediate;
+  vi.useFakeTimers();
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const advance = async (ms: number) => {
+    for (let elapsed = 0; elapsed < ms; elapsed += 20) {
+      vi.advanceTimersByTime(20);
+      await new Promise((resolve) => nextTick(resolve));
+    }
+  };
+
+  let failures = 0;
+  const requestsPerSecond = new Map<number, number>();
+  const rpc = createRpc({
+    common: context.common,
+    concurrency: 1,
+    chain: {
+      ...getChain(),
+      rpc: custom({
+        async request() {
+          if (failures > 0) {
+            failures--;
+            throw new HttpRequestError({ url: "http://rpc", status: 429 });
+          }
+          const second = Math.floor(Date.now() / 1000);
+          requestsPerSecond.set(
+            second,
+            (requestsPerSecond.get(second) ?? 0) + 1,
+          );
+          return "0x1";
+        },
+      }),
+    },
+  });
+
+  for (let i = 0; i < 3; i++) {
+    failures = 8;
+    const request = rpc.request({ method: "eth_blockNumber" });
+    await advance(40_000);
+    await request;
+  }
+  requestsPerSecond.clear();
+
+  let isSettled = false;
+  Promise.all(
+    Array.from({ length: 500 }, () =>
+      rpc.request({ method: "eth_blockNumber" }),
+    ),
+  ).then(() => {
+    isSettled = true;
+  });
+  await advance(5_000);
+
+  expect(Math.max(...requestsPerSecond.values())).toBe(5);
+
+  await advance(55_000);
+
+  expect(Math.max(...requestsPerSecond.values())).toBeGreaterThan(5);
+
+  while (isSettled === false) await advance(1_000);
+});
+
 test("createRpc() retry BlockNotFoundError", async () => {
   const chain = getChain();
   const rpc = createRpc({
@@ -66,11 +130,17 @@ test("https://github.com/ponder-sh/ponder/pull/2143", async () => {
     chain,
   });
 
+  let now = Date.now();
+  const dateSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+  onTestFinished(() => {
+    dateSpy.mockRestore();
+  });
+
   for (let i = 0; i < 10; i++) {
     for (let j = 0; j < 20; j++) {
       await rpc.request({ method: "eth_blockNumber" });
     }
-    await wait(1000);
+    now += 1000;
   }
 
   vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
@@ -82,7 +152,7 @@ test("https://github.com/ponder-sh/ponder/pull/2143", async () => {
   );
 
   await rpc.request({ method: "eth_blockNumber" });
-}, 15_000);
+});
 
 const topic0 =
   "0x0000000000000000000000000000000000000000000000000000000000000000" as const;

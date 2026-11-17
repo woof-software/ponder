@@ -1,5 +1,127 @@
 # ponder
 
+## 0.18.8
+
+### Patch Changes
+
+- [#2508](https://github.com/ponder-sh/ponder/pull/2508) [`df5502e`](https://github.com/ponder-sh/ponder/commit/df5502ed485403303f20f4596ca49196362430b3) Thanks [@kyscott18](https://github.com/kyscott18)! - Reduced the memory usage of live indexing with a single chain.
+
+## 0.18.7
+
+### Patch Changes
+
+- [#2476](https://github.com/ponder-sh/ponder/pull/2476) [`bef15af`](https://github.com/ponder-sh/ponder/commit/bef15af57b5603bbf6a238195d3e23fbe2de6f24) Thanks [@mkzung](https://github.com/mkzung)! - Fixed a bug that caused GraphQL queries with `where: null` to fail with `Cannot convert undefined or null to object`, and queries with `AND: null` or `OR: null` to fail with `Invalid query: Expected an array`. These values are now ignored.
+
+- [#2482](https://github.com/ponder-sh/ponder/pull/2482) [`5d005a2`](https://github.com/ponder-sh/ponder/commit/5d005a27a0a7f012e74358cbf486add6fb953ae8) Thanks [@kyscott18](https://github.com/kyscott18)! - Removed the GraphQL filter options `{column}_has` and `{column}_not_has` for `p.bytes()` columns, which always failed with a database error.
+
+- [#2483](https://github.com/ponder-sh/ponder/pull/2483) [`415225b`](https://github.com/ponder-sh/ponder/commit/415225bd5dd19abb1af848e389fbc1676534002d) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused the GraphQL error `arrayContains requires at least one value` when filtering an array column with an empty list, such as `{column}: []` or `{column}_not: []`.
+
+- [#2487](https://github.com/ponder-sh/ponder/pull/2487) [`522ef20`](https://github.com/ponder-sh/ponder/commit/522ef20e0731e51d07002e07980ce113c86b537e) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused GraphQL string filters on `p.hex()` columns, such as `{column}_starts_with` and `{column}_contains`, to be case-sensitive.
+
+- [#2482](https://github.com/ponder-sh/ponder/pull/2482) [`5d005a2`](https://github.com/ponder-sh/ponder/commit/5d005a27a0a7f012e74358cbf486add6fb953ae8) Thanks [@kyscott18](https://github.com/kyscott18)! - Removed GraphQL filter options for arrays of `p.json()` columns, which always failed with a database error.
+
+- [#2486](https://github.com/ponder-sh/ponder/pull/2486) [`a9d77f6`](https://github.com/ponder-sh/ponder/commit/a9d77f6e892d82142bcc2f75d93fd259bb984113) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused GraphQL string filters such as `{column}_contains` and `{column}_starts_with` to treat `%` and `_` in the filter value as wildcards. These characters are now matched literally.
+
+- [#2468](https://github.com/ponder-sh/ponder/pull/2468) [`d6720b0`](https://github.com/ponder-sh/ponder/commit/d6720b01afbc4cb0eb0bd2df546e2d497941736d) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused GraphQL cursor pagination to skip rows or return an incorrect `hasNextPage` or `hasPreviousPage` when the row referenced by the `after` or `before` cursor had been deleted or no longer matched the `where` filter.
+
+- [#2466](https://github.com/ponder-sh/ponder/pull/2466) [`7d53829`](https://github.com/ponder-sh/ponder/commit/7d53829d5954059e11315c34e91f49743b03edcc) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused a negative `limit` argument in GraphQL plural queries to return every matching row, bypassing the 1000-row maximum. Negative `limit` and `offset` values now return a validation error.
+
+- [#2480](https://github.com/ponder-sh/ponder/pull/2480) [`656438b`](https://github.com/ponder-sh/ponder/commit/656438be42753f46586993e3ad7f3e7e8fbcf9c4) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused GraphQL cursor pagination to stop early and skip rows when the `orderBy` column contained `NULL` values.
+
+- [#2469](https://github.com/ponder-sh/ponder/pull/2469) [`8dde803`](https://github.com/ponder-sh/ponder/commit/8dde8032a86c3627065aae2d97860f1f9c65145a) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused GraphQL queries with an `offset` to return `hasPreviousPage: true` for an empty page.
+
+- [#2484](https://github.com/ponder-sh/ponder/pull/2484) [`c22f07a`](https://github.com/ponder-sh/ponder/commit/c22f07a6c996c8378d7512db0e8a36ec1325cf78) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused a GraphQL `one` relation field with a `null` value to not always return `null`.
+
+- [#2475](https://github.com/ponder-sh/ponder/pull/2475) [`6257549`](https://github.com/ponder-sh/ponder/commit/62575498838891f6bc51582d151b7967c03aaa89) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused GraphQL queries with `orderBy` set to a `json` column to fail with the database error `could not identify an ordering operator for type json`. These queries now return a validation error. `jsonb` columns can still be used with `orderBy`.
+
+- [#2473](https://github.com/ponder-sh/ponder/pull/2473) [`282ca74`](https://github.com/ponder-sh/ponder/commit/282ca7499847b590178aec8b268d647bcf868b9f) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused the GraphQL error `Unknown column "null" used in orderBy argument` when the `orderBy` argument was `null`.
+
+- [#2470](https://github.com/ponder-sh/ponder/pull/2470) [`df3daf5`](https://github.com/ponder-sh/ponder/commit/df3daf5c190c587ad996c951b2cc73aa555f2a4b) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused GraphQL queries with `orderDirection: "ASC"` (or any value other than `"asc"`) to sort in descending order. `orderDirection` is now case-insensitive, and invalid values return a validation error.
+
+- [#2471](https://github.com/ponder-sh/ponder/pull/2471) [`0bd4a22`](https://github.com/ponder-sh/ponder/commit/0bd4a220ada823c2c5dbe61aa99b8e389b3aaf94) Thanks [@kyscott18](https://github.com/kyscott18)! - Removed the string filter options (such as `{column}_contains` and `{column}_starts_with`) from GraphQL filters for non-text columns, including `timestamp`, `date`, and `uuid` columns. These filters always failed with an error like `operator does not exist: timestamp without time zone ~~ unknown`.
+
+- [#2467](https://github.com/ponder-sh/ponder/pull/2467) [`4574041`](https://github.com/ponder-sh/ponder/commit/457404157f3dd2306b78a21e1781dbe6ed54d143) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused the GraphQL error `Cannot return null for non-nullable field <table>Page.totalCount.` when `totalCount` was selected through an inline fragment or fragment spread.
+
+- [#2476](https://github.com/ponder-sh/ponder/pull/2476) [`bef15af`](https://github.com/ponder-sh/ponder/commit/bef15af57b5603bbf6a238195d3e23fbe2de6f24) Thanks [@mkzung](https://github.com/mkzung)! - Fixed a bug that caused `{column}: null` and `{column}_not: null` GraphQL filters on array columns to match no rows. They now match `NULL` and non-`NULL` values.
+
+- [#2476](https://github.com/ponder-sh/ponder/pull/2476) [`bef15af`](https://github.com/ponder-sh/ponder/commit/bef15af57b5603bbf6a238195d3e23fbe2de6f24) Thanks [@mkzung](https://github.com/mkzung)! - Fixed a bug that caused a `null` value for GraphQL filter operators other than `{column}` and `{column}_not`, such as `{column}_gt`, `{column}_in`, or `{column}_contains`, to fail with a SQL syntax error or match the wrong rows. These filters are now ignored.
+
+- [#2476](https://github.com/ponder-sh/ponder/pull/2476) [`bef15af`](https://github.com/ponder-sh/ponder/commit/bef15af57b5603bbf6a238195d3e23fbe2de6f24) Thanks [@mkzung](https://github.com/mkzung)! - Fixed a bug that caused GraphQL filter lists containing `null`, such as `{column}_in: [1, null]` or `OR: [null]`, to fail with `Cannot convert undefined or null to object` or match the wrong rows. These queries now return the error `Invalid query: {key} cannot contain null`.
+
+- [#2448](https://github.com/ponder-sh/ponder/pull/2448) [`bfe2c41`](https://github.com/ponder-sh/ponder/commit/bfe2c41f674f03ac52f47795f746233eb5af84d4) Thanks [@WillXing](https://github.com/WillXing)! - Fixed a bug that caused GraphQL OR filters to match extra rows when a branch contained multiple fields.
+
+## 0.18.6
+
+### Patch Changes
+
+- [#2450](https://github.com/ponder-sh/ponder/pull/2450) [`98a50b5`](https://github.com/ponder-sh/ponder/commit/98a50b5f050f5df92a8fb9efb8cca0548a814f41) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused a log that failed to decode to change how later logs of the same event were decoded when the event has an array parameter.
+
+- [#2456](https://github.com/ponder-sh/ponder/pull/2456) [`9a20a02`](https://github.com/ponder-sh/ponder/commit/9a20a0263d64f64214d14197a8a4a8e01954e755) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused a `p.json()` or `p.jsonb()` column value that is a string containing JSON, such as `"1"`, `"true"`, or `'{"a":1}'`, to be returned parsed by GraphQL, `@ponder/client`, and database reads, while the indexing cache returned the string.
+
+- [#2459](https://github.com/ponder-sh/ponder/pull/2459) [`d6a876a`](https://github.com/ponder-sh/ponder/commit/d6a876a7b35e6ef90d0ffeee2079e33a5c608159) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused some `context.db` and `context.client` calls to fail with `TypeError: Cannot read properties of undefined` in indexing functions of logs without a transaction, such as on ZKsync.
+
+- [#2455](https://github.com/ponder-sh/ponder/pull/2455) [`d35fabe`](https://github.com/ponder-sh/ponder/commit/d35fabe8973ccf8b09929c522fd9ad1b54d8f003) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused the error `TypeError: undefined is not an object (evaluating 'event.event')` (or `Cannot read properties of undefined (reading 'event')`) during the backfill when a chain with `cacheRpcRequests: false` was indexed, and an indexing function read an event property for the first time.
+
+- [#2452](https://github.com/ponder-sh/ponder/pull/2452) [`ac01f82`](https://github.com/ponder-sh/ponder/commit/ac01f827aa28775fc2c9aecb2052b4b9175483b0) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused indexing to fail with `InvalidEventAccessError` when an indexing function read a property of `event.transaction` that belongs to another transaction type, such as `gasPrice` on an EIP-1559 transaction. This affected live indexing and chains with `cacheRpcRequests: false`. These properties are now `undefined`.
+
+- [#2453](https://github.com/ponder-sh/ponder/pull/2453) [`6e1b286`](https://github.com/ponder-sh/ponder/commit/6e1b2862edca8663562773fde200025233bb23b7) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused indexing to fail with `InvalidEventAccessError` when an indexing function read `gasPrice`, `accessList`, `maxFeePerGas`, or `maxPriorityFeePerGas` of a transaction with a type other than legacy, EIP-2930, EIP-1559, or deposit, such as a blob or EIP-7702 transaction. This affected live indexing and chains with `cacheRpcRequests: false`.
+
+- [#2451](https://github.com/ponder-sh/ponder/pull/2451) [`ef9aaf8`](https://github.com/ponder-sh/ponder/commit/ef9aaf8925fb9f9e1035bcb4ddd11f76b44dc6e1) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused `context.db.update()` and `onConflictDoUpdate()` to ignore columns defined with `.$onUpdateFn()`. These columns are now set to the value returned by the function when the update doesn't set them.
+
+## 0.18.5
+
+### Patch Changes
+
+- [#2447](https://github.com/ponder-sh/ponder/pull/2447) [`f900797`](https://github.com/ponder-sh/ponder/commit/f9007977e5960ffac670670cac4e6da2ba9d07fc) Thanks [@cruzdanilo](https://github.com/cruzdanilo)! - Improved backfill speed for block ranges with many blocks and sparse events.
+- Updated dependencies [[`f900797`](https://github.com/ponder-sh/ponder/commit/f9007977e5960ffac670670cac4e6da2ba9d07fc)]:
+  - @ponder/utils@0.3.1
+
+## 0.18.4
+
+### Patch Changes
+
+- [#2427](https://github.com/ponder-sh/ponder/pull/2427) [`16fc227`](https://github.com/ponder-sh/ponder/commit/16fc227d692202adb498839d36963b202b9d784e) Thanks [@tremarkley](https://github.com/tremarkley)! - Fixed a bug that caused Postgres queries to hang or fail with `timeout exceeded when trying to connect` after a database restart or failover until Ponder was restarted.
+
+## 0.18.3
+
+No changes in this release.
+
+## 0.18.2
+
+### Patch Changes
+
+- [#2420](https://github.com/ponder-sh/ponder/pull/2420) [`fe6be0c`](https://github.com/ponder-sh/ponder/commit/fe6be0cbe5207253fb272d95061e3e28c8b54418) Thanks [@kyscott18](https://github.com/kyscott18)! - Updated `eth_getLogs` requests in live indexing to include `address` and `topics` filters.
+
+- [#2420](https://github.com/ponder-sh/ponder/pull/2420) [`fe6be0c`](https://github.com/ponder-sh/ponder/commit/fe6be0cbe5207253fb272d95061e3e28c8b54418) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused live indexing to miss factory child addresses when the factory was only used by call trace or account sources.
+
+## 0.18.1
+
+### Patch Changes
+
+- [#2406](https://github.com/ponder-sh/ponder/pull/2406) [`d3f03c7`](https://github.com/ponder-sh/ponder/commit/d3f03c74ac7ef4adefdb0c183af3761e253ccd69) Thanks [@kyscott18](https://github.com/kyscott18)! - Reduced memory allocation and peak memory usage during backfill indexing.
+
+- [#2407](https://github.com/ponder-sh/ponder/pull/2407) [`ab1aecd`](https://github.com/ponder-sh/ponder/commit/ab1aecda878c351a8f6bb80f729dc6f964cdc719) Thanks [@kyscott18](https://github.com/kyscott18)! - Reduced CPU usage and memory allocation of logs bloom checks during live indexing.
+
+## 0.18.0
+
+### Minor Changes
+
+- [#2383](https://github.com/ponder-sh/ponder/pull/2383) [`1f4bd97`](https://github.com/ponder-sh/ponder/commit/1f4bd97a4d9606b922020ae8e2d97cbed78a872f) Thanks [@kyscott18](https://github.com/kyscott18)! - Released `0.18`. Visit the [migration guide](https://ponder.sh/docs/migration-guide#018) for details.
+
+### Patch Changes
+
+- [#2383](https://github.com/ponder-sh/ponder/pull/2383) [`1f4bd97`](https://github.com/ponder-sh/ponder/commit/1f4bd97a4d9606b922020ae8e2d97cbed78a872f) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug with `ordering: "omnichain"` that caused backfill events to be ordered incorrectly or skipped.
+
+- [#2383](https://github.com/ponder-sh/ponder/pull/2383) [`1f4bd97`](https://github.com/ponder-sh/ponder/commit/1f4bd97a4d9606b922020ae8e2d97cbed78a872f) Thanks [@kyscott18](https://github.com/kyscott18)! - Exported the `encodeCheckpoint` and `decodeCheckpoint` utilities and the `Checkpoint` type from `ponder`.
+
+- [#2383](https://github.com/ponder-sh/ponder/pull/2383) [`1f4bd97`](https://github.com/ponder-sh/ponder/commit/1f4bd97a4d9606b922020ae8e2d97cbed78a872f) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that caused Ponder to load a `vite.config.ts` file from the project root.
+
+- [#2383](https://github.com/ponder-sh/ponder/pull/2383) [`1f4bd97`](https://github.com/ponder-sh/ponder/commit/1f4bd97a4d9606b922020ae8e2d97cbed78a872f) Thanks [@kyscott18](https://github.com/kyscott18)! - Improved startup performance by loading the `ponder` package without transforming it with Vite.
+
+- [#2383](https://github.com/ponder-sh/ponder/pull/2383) [`1f4bd97`](https://github.com/ponder-sh/ponder/commit/1f4bd97a4d9606b922020ae8e2d97cbed78a872f) Thanks [@kyscott18](https://github.com/kyscott18)! - Updated `ponder dev` to not watch the `.ponder` and `generated` directories.
+
+- [#2383](https://github.com/ponder-sh/ponder/pull/2383) [`1f4bd97`](https://github.com/ponder-sh/ponder/commit/1f4bd97a4d9606b922020ae8e2d97cbed78a872f) Thanks [@kyscott18](https://github.com/kyscott18)! - Fixed a bug that could cause an account `transaction` event to receive the transaction receipt of a different transaction in the same block.
+
 ## 0.17.12
 
 ### Patch Changes
