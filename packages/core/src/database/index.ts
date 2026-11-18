@@ -435,7 +435,9 @@ export const createDatabase = ({
         .wrap({ label: "migrate_sync" }, () =>
           db.transaction(
             async (tx) => {
-              await tx.execute(sql`SET LOCAL statement_timeout = 3600000`);
+              // Note: 10 hours, because copying a large RPC cache from
+              // "ponder_sync" can take over an hour.
+              await tx.execute(sql`SET LOCAL statement_timeout = 36000000`);
 
               const dbSchemas = await tx
                 .select()
